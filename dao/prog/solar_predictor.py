@@ -8,6 +8,7 @@ hourly solar production based on weather data and historical solar output.
 import pandas as pd
 import numpy as np
 import joblib
+import json
 import os
 import sys
 import warnings
@@ -637,6 +638,7 @@ class SolarPredictor(DaBase):
             exist_ok=True,
         )
         joblib.dump(self.model, model_save_path)
+        self.save_training_stats(model_save_path)
         self.is_trained = True
 
         logging.info(f"Model training van {self.solar_name} complete")
@@ -651,6 +653,46 @@ class SolarPredictor(DaBase):
         for i, (feature, score) in enumerate(sorted_features):
             logging.info(f"  {i + 1}. {feature}: {score:.3f}")
         return self.training_stats
+
+    def save_training_stats(self, model_save_path: str):
+        """
+        Schrijft de trainingsresultaten weg naast het model, zodat externe
+        clients (web-ui, api, Home Assistant) de kwaliteit van het model kunnen
+        tonen zonder het model zelf te laden.
+        :param model_save_path: pad van het zojuist opgeslagen model
+        :return: het pad van het statistiekbestand of None
+        """
+
+        def to_native(value):
+            if isinstance(value, dict):
+                return {k: to_native(v) for k, v in value.items()}
+            if isinstance(value, (np.integer,)):
+                return int(value)
+            if isinstance(value, (np.floating, float)):
+                value = float(value)
+                return None if math.isnan(value) or math.isinf(value) else value
+            if isinstance(value, np.ndarray):
+                return [to_native(v) for v in value.tolist()]
+            return value
+
+        stats_path = os.path.splitext(model_save_path)[0] + "_stats.json"
+        content = {
+            "name": self.solar_name,
+            "trained_at": dt.datetime.now().isoformat(timespec="seconds"),
+            "capacity": self.solar_capacity,
+            "tilt": self.tilt,
+            "azimut": self.azimut,
+            "entities": list(self.solar_entities),
+            **{k: to_native(v) for k, v in self.training_stats.items()},
+        }
+        try:
+            with open(stats_path, "w") as f:
+                json.dump(content, f, indent=2)
+        except OSError as ex:
+            logging.warning(f"Trainingsstatistieken niet opgeslagen: {ex}")
+            return None
+        logging.info(f"Training stats saved to: {stats_path}")
+        return stats_path
 
     def predict(
         self, weather_data: Union[Dict[str, float], pd.DataFrame]
