@@ -7,9 +7,12 @@ import htmx from 'htmx.org'
 
 window.htmx = htmx
 
-if (document.getElementById('data-chart')) {
-    import('./charts.js')
-}
+// Chart.js is loaded on demand. Pages wait for window.chartReady before they
+// use Chart or renderChartSpec, so it no longer matters whether the module or
+// the page's data arrives first.
+window.chartReady = (document.getElementById('data-chart') || document.getElementById('chart-spec'))
+    ? import('./charts.js')
+    : Promise.resolve()
 
 if (document.querySelector('code-input')) {
     import('./code-editor.js')
@@ -28,6 +31,7 @@ function fillCurrentTimezoneFields(root = document) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    applyChartTheme();
     fillCurrentTimezoneFields();
 
     const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]')

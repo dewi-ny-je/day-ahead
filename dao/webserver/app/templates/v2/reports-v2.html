@@ -670,6 +670,12 @@
         tabData.classList.remove('error');
 
         const data = await getData(params);
+        // Chart.js wordt los geladen; wacht tot het er is. main.js is een
+        // module en draait pas vlak voor DOMContentLoaded, dus chartReady kan
+        // hier nog ontbreken.
+        await (window.chartReady ?? new Promise(resolve =>
+            document.addEventListener('DOMContentLoaded', () => resolve(window.chartReady))
+        ));
         if (data === false) {
             tabData.classList.remove('loading');
             tabData.classList.add('error');
@@ -685,8 +691,10 @@
             syncDatasets(dataChart, config);
         }
 
-        const columns = Object.keys(data[0]);
-        columns.splice(columns.indexOf('ts'), 1);
+        // Zonder data zijn er geen kolommen om af te leiden.
+        const columns = data.length > 0
+            ? Object.keys(data[0]).filter(column => column !== 'ts')
+            : [];
 
         updateVisibleAxes(dataChart);
         dataChart.update();
@@ -699,11 +707,7 @@
         const params = getFormParams();
         updateUrl(params);
 
-        if (e.target.id !== 'preset') {
-            updateDataThrottled(params);
-        } else {
-            dataChart.update("none");
-        }
+        updateDataThrottled(params);
     });
 
     window.addEventListener('load', () => {
