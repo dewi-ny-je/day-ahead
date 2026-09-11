@@ -11,11 +11,6 @@ if (document.getElementById('data-chart')) {
     import('./charts.js')
 }
 
-if (document.querySelector('code-input')) {
-    import('./code-editor.js')
-    import('./code-editor.scss')
-}
-
 
 function fillCurrentTimezoneFields(root = document) {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -27,8 +22,18 @@ function fillCurrentTimezoneFields(root = document) {
         });
 }
 
+// CodeMirror is only needed on the config, secrets and log pages, so it is
+// loaded on demand to keep it out of the main bundle.
+function loadCodeEditors() {
+    if (!document.querySelector('[data-code-editor]')) return;
+
+    import('./code-editor.js').then((module) => module.initCodeEditors());
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     fillCurrentTimezoneFields();
+
+    loadCodeEditors();
 
     const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]')
     const tooltipList = [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl))
