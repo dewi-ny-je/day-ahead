@@ -1,4 +1,4 @@
-// Bootstrap-icons en het Prism-thema worden in main.js geimporteerd.
+// Bootstrap-icons wordt in main.js geimporteerd.
 @use "bootstrap/scss/bootstrap" as *;
 
 .icon-nav {
@@ -67,144 +67,123 @@ h1 {
   }
 }
 
-code-input {
-  --padding: 0.75rem;
-
-  width: 100%;
-  min-height: 15rem;
-
-  font-family: var(--bs-font-monospace);
-  font-size: 0.875rem;
-  line-height: 1.5;
-
-  background-color: var(--bs-body-bg);
-  border: var(--bs-border-width) solid var(--bs-border-color);
-  border-radius: var(--bs-border-radius);
-  overflow: hidden;
+// CodeMirror 6 (config, secrets and log pages).  All colours come from the
+// Bootstrap variables so the editor follows the light/dark theme without any
+// JavaScript; see assets/code-editor.js for the highlight classes.
+.code-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 
   --code-comment: #6c757d;
   --code-punctuation: #495057;
   --code-property: #b02a37;
   --code-string: #146c43;
   --code-number: #6f42c1;
-  --code-operator: #055160;
-  --code-keyword: #6f42c1;
-  --code-function: #9a6700;
+  --code-invalid: #b02a37;
 }
 
-[data-bs-theme="dark"] code-input {
+[data-bs-theme="dark"] .code-editor {
   --code-comment: #8b949e;
   --code-punctuation: #c9d1d9;
   --code-property: #79c0ff;
   --code-string: #a5d6ff;
   --code-number: #d2a8ff;
-  --code-operator: #ff7b72;
-  --code-keyword: #ff7b72;
-  --code-function: #d2a8ff;
+  --code-invalid: #ff7b72;
 }
 
-code-input pre[class*="language-"],
-code-input code[class*="language-"] {
-  margin: 0;
-  font: inherit;
-  line-height: inherit;
+// Only shown once the editor replaced the textarea.
+.code-editor-toolbar {
+  align-self: flex-start;
+}
+
+.code-editor .cm-editor {
+  flex: 1 1 auto;
+  min-height: 15rem;
+
+  font-family: var(--bs-font-monospace);
+  font-size: 0.875rem;
+
+  background-color: var(--bs-body-bg);
   color: var(--bs-body-color);
-  background: var(--bs-body-bg);
-  text-shadow: none;
+  border: var(--bs-border-width) solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  overflow: hidden;
 }
 
-code-input textarea {
-  font: inherit;
-  line-height: inherit;
-  caret-color: var(--bs-body-color);
-}
-
-code-input:has(textarea:focus) {
+.code-editor .cm-editor.cm-focused {
   border-color: #86b7fe;
   outline: 0;
   box-shadow: 0 0 0 0.25rem rgb(13 110 253 / 25%);
 }
 
-code-input:has(textarea:disabled),
-code-input:has(textarea:disabled) pre[class*="language-"] {
+.code-editor .cm-scroller {
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.code-editor .cm-gutters {
+  background-color: var(--bs-tertiary-bg);
+  color: var(--bs-secondary-color);
+  border-right: var(--bs-border-width) solid var(--bs-border-color);
+}
+
+.code-editor .cm-activeLine,
+.code-editor .cm-activeLineGutter {
   background-color: var(--bs-secondary-bg);
 }
 
-code-input .token.comment,
-code-input .token.prolog,
-code-input .token.doctype,
-code-input .token.cdata {
+.code-editor .cm-foldGutter span {
+  color: var(--bs-secondary-color);
+  cursor: pointer;
+}
+
+.code-editor .cm-foldPlaceholder {
+  background-color: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  border: var(--bs-border-width) solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-sm);
+  padding: 0 0.4em;
+}
+
+.code-editor .cm-cursor {
+  border-left-color: var(--bs-body-color);
+}
+
+.code-editor .cm-selectionBackground,
+.code-editor .cm-content ::selection,
+.code-editor .cm-focused .cm-selectionBackground {
+  background-color: var(--bs-highlight-bg);
+}
+
+.code-editor .cm-panels {
+  background-color: var(--bs-tertiary-bg);
+  color: var(--bs-body-color);
+  border-color: var(--bs-border-color);
+}
+
+.code-editor .cm-token-comment {
   color: var(--code-comment);
 }
 
-code-input .token.punctuation {
+.code-editor .cm-token-punctuation {
   color: var(--code-punctuation);
 }
 
-code-input .token.property,
-code-input .token.tag,
-code-input .token.constant,
-code-input .token.symbol,
-code-input .token.deleted {
+.code-editor .cm-token-property {
   color: var(--code-property);
 }
 
-code-input .token.string,
-code-input .token.char,
-code-input .token.attr-name,
-code-input .token.builtin,
-code-input .token.inserted {
+.code-editor .cm-token-string {
   color: var(--code-string);
 }
 
-code-input .token.boolean,
-code-input .token.number {
+.code-editor .cm-token-number {
   color: var(--code-number);
 }
 
-code-input .token.operator,
-code-input .token.entity,
-code-input .token.url {
-  color: var(--code-operator);
-  background-color: transparent;
-}
-
-code-input .token.atrule,
-code-input .token.attr-value,
-code-input .token.keyword {
-  color: var(--code-keyword);
-}
-
-code-input .token.function,
-code-input .token.class-name {
-  color: var(--code-function);
-}
-
-code-input .token.regex,
-code-input .token.important,
-code-input .token.variable {
-  color: var(--code-function);
-}
-
-code-input .token.bold,
-code-input .token.important {
-  font-weight: 700;
-}
-
-code-input .token.italic {
-  font-style: italic;
-}
-
-code-input.line-numbers pre {
-  padding-left: 3.8em;
-}
-
-code-input .line-numbers-rows {
-  border-right-color: var(--bs-border-color);
-}
-
-code-input .line-numbers-rows > span::before {
-  color: var(--bs-secondary-color);
+.code-editor .cm-token-invalid {
+  color: var(--code-invalid);
 }
 
 [data-bs-theme="dark"] .theme-dark-hidden,
