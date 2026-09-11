@@ -661,16 +661,16 @@ def config():
     error = None
     success = None
 
-    if request.method == "POST" and request.form.to_dict()["config"] is not None:
+    newconfig = request.form.get("config")
+    if request.method == "POST" and newconfig is not None:
         try:
-            newconfig = request.form.to_dict()["config"]
             # try loading json
             json.loads(newconfig)
             with open(path, "w") as f:
                 f.write(newconfig)
             success = "Config updated successfully"
         except Exception as err:
-            error = "Error: " + err.args[0]
+            error = "Error: " + str(err)
 
     with open(path, "r") as file:
         content = file.read()
@@ -689,19 +689,16 @@ def secrets():
     error = None
     success = None
 
-    if request.method == "POST" and request.form.to_dict()["secrets"] is not None:
+    newsecrets = request.form.get("secrets")
+    if request.method == "POST" and newsecrets is not None:
         try:
-            newsecrets = request.form.to_dict()["secrets"]
             # try loading json
             json.loads(newsecrets)
             with open(path, "w") as f:
                 f.write(newsecrets)
             success = "Secrets updated successfully"
         except Exception as err:
-            error = "Error: " + err.args[0]
-
-    with open(path, "r") as file:
-        content = file.read()
+            error = "Error: " + str(err)
 
     with open(path, "r") as file:
         content = file.read()
