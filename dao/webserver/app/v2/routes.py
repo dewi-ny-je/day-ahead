@@ -661,8 +661,8 @@ def config():
     error = None
     success = None
 
-    if request.method == "POST" and request.form.to_dict()["config"] is not None:
-        content = request.form.to_dict()["config"]
+    if request.method == "POST" and request.form.get("config") is not None:
+        content = request.form.get("config")
         try:
             # try loading json
             json.loads(content)
@@ -689,8 +689,8 @@ def secrets():
     error = None
     success = None
 
-    if request.method == "POST" and request.form.to_dict()["secrets"] is not None:
-        content = request.form.to_dict()["secrets"]
+    if request.method == "POST" and request.form.get("secrets") is not None:
+        content = request.form.get("secrets")
         try:
             # try loading json
             json.loads(content)
