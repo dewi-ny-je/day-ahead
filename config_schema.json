@@ -1281,6 +1281,14 @@
           "x-help": "Matplotlib visual style for generated graphs. 'dark_background' matches Home Assistant dark theme. Other options: 'default', 'seaborn', 'ggplot', 'bmh', 'fivethirtyeight'.",
           "x-ui-section": "Graphics"
         },
+        "generate png": {
+          "default": false,
+          "description": "Draw the png chart at the end of every calculation",
+          "title": "Generate Png",
+          "type": "boolean",
+          "x-help": "False (default): a calculation only saves the data behind its chart, and the png is drawn the first time you open it in the web UI. This saves several seconds per calculation. True: draw the png right after each calculation, as older versions did. Use this if something outside the web UI reads the png files from data/images.",
+          "x-ui-section": "Graphics"
+        },
         "battery balance": {
           "default": true,
           "description": "Show battery balance in graphs",
@@ -1325,7 +1333,7 @@
       "title": "GraphicsConfig",
       "type": "object",
       "x-docs-url": "https://github.com/corneel27/day-ahead/wiki/Graphics",
-      "x-help": "# Graphics & Visualization\n\nConfigure graphs and visualizations of optimization results.\n\n## Graph Types\n\nGraphs can show:\n- **Battery balance**: SOC and charge/discharge schedule\n- **Prices**: Consumption, production, and spot prices\n- **Average consumption**: Baseline vs optimized usage\n\n## When to Use\n\n- Enable during testing to visualize optimization\n- Useful for understanding system behavior\n- Can be displayed in Home Assistant dashboard\n- Disable in production if graphs not needed (saves resources)\n\n## Tips\n\n- Graphs saved to add-on data directory\n- Use dark_background style to match HA theme\n- Toggle individual elements to simplify graphs\n- Graphs regenerated each optimization run\n",
+      "x-help": "# Graphics & Visualization\n\nConfigure graphs and visualizations of optimization results.\n\n## Graph Types\n\nGraphs can show:\n- **Battery balance**: SOC and charge/discharge schedule\n- **Prices**: Consumption, production, and spot prices\n- **Average consumption**: Baseline vs optimized usage\n\n## When to Use\n\n- Enable during testing to visualize optimization\n- Useful for understanding system behavior\n- Can be displayed in Home Assistant dashboard\n- Disable in production if graphs not needed (saves resources)\n\n## Tips\n\n- Graphs saved to add-on data directory\n- Use dark_background style to match HA theme\n- Toggle individual elements to simplify graphs\n- Each optimization run saves its chart data; the png is drawn when first opened in the web UI (or right away with \"generate png\")\n",
       "x-icon": "chart-line",
       "x-order": 13,
       "x-ui-group": "Reporting"

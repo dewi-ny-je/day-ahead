@@ -586,6 +586,7 @@ class DaBase(hass.Hass):
         clean_folder("../data/log", "*.log")
         clean_folder("../data/log", "dashboard.log.*")
         clean_folder("../data/images", "*.png")
+        clean_folder("../data/images", "calc_*.json")
 
     def calc_optimum_met_debug(self):
         from day_ahead import DaCalc
