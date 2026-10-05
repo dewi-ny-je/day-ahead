@@ -393,13 +393,20 @@ def _make_noop_call_service(label: str):
 
 
 # Onderdrukt het wegschrijven van de PNG-afbeelding die day_ahead.py ongeacht debug-modus altijd maakt.
-def _make_noop_savefig(label: str):
-    # Doet niets in plaats van een bestand op schijf te zetten.
-    def _noop_savefig(*args, **kwargs):
-        logger.debug("%s: onderdrukt write plt.savefig%s", label, args)
+def _make_calc_graph_writer(label: str, png: bool):
+    # Vervangt da_calc_graph.write_calc_graph: zonder png schrijft hij niets,
+    # met png alleen de png (geen calc_*.json naast elke capture/replay).
+    from dao.prog import da_calc_graph
+
+    def _write_calc_graph(data, images_dir, draw=False):
+        if not png:
+            logger.debug("%s: onderdrukt write_calc_graph(%s)", label, images_dir)
+            return None
+        stem = da_calc_graph.file_stem(dt.datetime.fromisoformat(data["start_dt"]))
+        da_calc_graph.draw_calc_graph(data, f"{images_dir}/{stem}{da_calc_graph.PNG_EXT}")
         return None
 
-    return _noop_savefig
+    return _write_calc_graph
 
 
 # ---------------------------------------------------------------------------
@@ -590,18 +597,21 @@ class RecordingIO:
             self._patches.set(DaBase, "set_value", _make_noop_set_value(label))
             self._patches.set(DaBase, "call_service", _make_noop_call_service(label))
 
-        # Independent of --debug: day_ahead.py writes a PNG chart
-        # unconditionally, regardless of self.debug. Off by default here —
+        # Independent of --debug: day_ahead.py saves its chart data (and
+        # with graphics "generate png" the png), regardless of self.debug.
+        # Here nothing is written unless --png, which draws the png. Off by
+        # default —
         # a capture/replay session usually doesn't need one and it's one
         # more file cluttering ../data/images per run — but it's a plain
         # local file write with no HA/DB implications, so turning it on
         # doesn't need debug mode too.
-        if not self._png:
-            import matplotlib.pyplot as plt
+        from dao.prog import da_calc_graph
 
-            self._patches.set(
-                plt, "savefig", _make_noop_savefig(f"RecordingIO({self.out_dir})")
-            )
+        self._patches.set(
+            da_calc_graph,
+            "write_calc_graph",
+            _make_calc_graph_writer(f"RecordingIO({self.out_dir})", self._png),
+        )
 
         original_get_state = DaBase.get_state
 
@@ -1180,10 +1190,11 @@ class ReplayIO:
         # PNG is a plain local file, not an HA/DB write, so whether to
         # keep it is its own switch. Off by default — see `png` on
         # __init__.
-        if not self._png:
-            import matplotlib.pyplot as plt
+        from dao.prog import da_calc_graph
 
-            self._patches.set(plt, "savefig", _make_noop_savefig(label))
+        self._patches.set(
+            da_calc_graph, "write_calc_graph", _make_calc_graph_writer(label, self._png)
+        )
 
         try:
             import freezegun

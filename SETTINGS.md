@@ -1431,7 +1431,7 @@ Graphs can show:
 - Graphs saved to add-on data directory
 - Use dark_background style to match HA theme
 - Toggle individual elements to simplify graphs
-- Graphs regenerated each optimization run
+- Each optimization run saves its chart data; the png is drawn when first opened in the web UI (or right away with "generate png")
 
 
 📚 [**View detailed documentation →**](https://github.com/corneel27/day-ahead/wiki/Graphics)
@@ -1439,6 +1439,7 @@ Graphs can show:
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `style` | string | No | `"dark_background"` | Matplotlib style (e.g., 'dark_background', 'default') |
+| `generate png` | boolean | No | `false` | Draw the png chart at the end of every calculation |
 | `battery balance` | boolean | No | `true` | Show battery balance in graphs |
 | `prices consumption` | boolean | No | `true` | Show consumption prices in graphs |
 | `prices production` | boolean | No | `false` | Show production prices in graphs |
@@ -1451,6 +1452,10 @@ Graphs can show:
 **`style`**
 
 Matplotlib visual style for generated graphs. 'dark_background' matches Home Assistant dark theme. Other options: 'default', 'seaborn', 'ggplot', 'bmh', 'fivethirtyeight'.
+
+**`generate png`**
+
+False (default): a calculation only saves the data behind its chart, and the png is drawn the first time you open it in the web UI. This saves several seconds per calculation. True: draw the png right after each calculation, as older versions did. Use this if something outside the web UI reads the png files from data/images.
 
 **`battery balance`**
 

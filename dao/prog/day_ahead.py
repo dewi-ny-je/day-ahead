@@ -12,11 +12,13 @@ import tempfile
 import time
 import sys
 import math
+import numpy as np
 import pandas as pd
 from contextlib import contextmanager
 from mip import Model, xsum, minimize, BINARY, CONTINUOUS, INTEGER
 from pandas.core.dtypes.inference import is_number
 from dao.prog.da_report import Report
+from dao.prog import da_calc_graph
 from dao.prog.ev_schedule import format_ev_charge_schedule
 from utils import (
     interpolate,
@@ -4631,656 +4633,101 @@ class DaCalc(DaBase):
             soc_p[b].append(soc[b][U].x)
             """
 
-        # grafiek 1
-        import numpy as np
-        from dao.lib.da_graph import GraphBuilder
-
-        gr1_df = pd.DataFrame()
-        gr1_df["index"] = np.arange(U)
-        gr1_df["uur"] = uur[0:U]
-        gr1_df["verbruik"] = c_l_p
-        gr1_df["productie"] = c_t_n
-        gr1_df["baseload"] = base_n
-        gr1_df["boiler"] = boiler_n
-        gr1_df["heatpump"] = heatpump_n
-        gr1_df["ev"] = ev_n
-        gr1_df["mach"] = mach_n
-        gr1_df["pv_ac"] = pv_p_opt
-        gr1_df["pv_dc"] = pv_ac_p
-        gr1_df["accu_in"] = accu_in_n
-        gr1_df["accu_out"] = accu_out_p
-        style = self.config.graphics.style
-        gr1_options = {
-            "title": "Prognose berekend op: " + start_dt.strftime("%Y-%m-%d %H:%M"),
-            "style": style,
-            "haxis": {"values": "uur", "title": "uren van de dag"},
-            "graphs": [
-                {
-                    "vaxis": [{"title": "kW"}],
-                    "series": [
-                        {"column": "verbruik", "type": "stacked", "color": "#00bfff"},
-                        {
-                            "column": "pv_ac",
-                            "title": "PV-AC",
-                            "type": "stacked",
-                            "color": "green",
-                        },
-                        {
-                            "column": "accu_out",
-                            "title": "Accu out",
-                            "type": "stacked",
-                            "color": "red",
-                        },
-                        {
-                            "column": "baseload",
-                            "title": "Overig verbr.",
-                            "type": "stacked",
-                            "color": "#f1a603",
-                        },
-                        {"column": "boiler", "type": "stacked", "color": "#e39ff6"},
-                        {
-                            "column": "heatpump",
-                            "title": "WP",
-                            "type": "stacked",
-                            "color": "#a32cc4",
-                        },
-                        {
-                            "column": "ev",
-                            "title": "EV",
-                            "type": "stacked",
-                            "color": "yellow",
-                        },
-                        {
-                            "column": "mach",
-                            "title": "App.",
-                            "type": "stacked",
-                            "color": "brown",
-                        },
-                        {
-                            "column": "productie",
-                            "title": "Teruglev.",
-                            "type": "stacked",
-                            "color": "#0080ff",
-                        },
-                        {
-                            "column": "accu_in",
-                            "title": "Accu in",
-                            "type": "stacked",
-                            "color": "#ff8000",
-                        },
-                    ],
-                }
-            ],
-        }
-
-        backend = self.config.graphical_backend or ""
-        gb = GraphBuilder(backend)
-
-        grid0_df = pd.DataFrame()
-        grid0_df["index"] = np.arange(U)
-        grid0_df["uur"] = uur[0:U]
-        grid0_df["uur"] = grid0_df["uur"].str[2:]
-        grid0_df["verbruik"] = org_l
-        grid0_df["productie"] = org_t
-        grid0_df["baseload"] = base_n
-        grid0_df["boiler"] = boiler_n
-        grid0_df["heatpump"] = heatpump_n
-        grid0_df["ev"] = ev_n
-        grid0_df["mach"] = mach_n
-        grid0_df["pv_ac"] = pv_ac_p
-        grid0_df["pv_dc"] = pv_p_org
-        style = self.config.graphics.style
-        import matplotlib.pyplot as plt
-        import matplotlib.ticker as ticker
-        import matplotlib.lines as mlines
-
-        plt.set_loglevel(level="warning")
-        pil_logger = logging.getLogger("PIL")
-        # override the logger logging level to INFO
-        pil_logger.setLevel(max(logging.INFO, self.log_level))
-
-        show_battery_balance = (
-            str(self.config.graphics.battery_balance).lower() == "true"
-        )
-        plt.style.use(style)
-        uur_labels = []
-        for u in range(U):
-            if uur[u] == "00:00":
-                s = tijd[u].strftime("%d-%m")
-            else:
-                s = uur[u][0:2]
-            uur_labels.append(s)
-        # uur_labels = [s[0:2] for s in uur]
-        nrows = 3
-        if show_battery_balance and B > 0:
-            nrows += B
-        fig, axis = plt.subplots(figsize=(8, 3 * nrows), nrows=nrows)
-
-        # volgorde 1 pv_org 2 pv_ac 3 levering
-        breedte = [
-            (tijd[i + 1] - tijd[i]).total_seconds() * 0.9 / 86400
-            for i in range(len(tijd) - 1)
-        ]
-        breedte.append(breedte[-1])
-        if solar_num > 0:
-            axis[0].bar(
-                tijd,
-                np.array(pv_p_org),
-                width=breedte,
-                label="PV AC",
-                color="green",
-                align="edge",
-            )
-        # 2
-        if sum(pv_ac_p) > 0:
-            axis[0].bar(
-                tijd,
-                np.array(pv_ac_p),
-                width=breedte,
-                bottom=np.array(pv_p_org),
-                label="PV DC",
-                color="lime",
-                align="edge",
-            )
-        # 3
-        axis[0].bar(
-            tijd,
-            np.array(org_l),
-            width=breedte,
-            bottom=np.array(pv_p_org) + np.array(pv_ac_p),
-            label="Levering",
-            color="#00bfff",
-            align="edge",
-        )
-
-        axis[0].bar(
-            tijd,
-            np.array(base_n),
-            width=breedte,
-            label="Overig verbr.",
-            color="#f1a603",
-            align="edge"
-        )
-        if self.boiler_present:
-            axis[0].bar(
-                tijd,
-                np.array(boiler_n),
-                width=breedte,
-                bottom=np.array(base_n),
-                label="Boiler",
-                color="#e39ff6",
-                align="edge",
-            )
-        if self.hp_present:
-            axis[0].bar(
-                tijd,
-                np.array(heatpump_n),
-                width=breedte,
-                bottom=np.array(base_n) + np.array(boiler_n),
-                label="WP",
-                color="#a32cc4",
-                align="edge",
-            )
-        if EV > 0:
-            axis[0].bar(
-                tijd,
-                np.array(ev_n),
-                width=breedte,
-                bottom=np.array(base_n) + np.array(boiler_n) + np.array(heatpump_n),
-                label="EV laden",
-                color="yellow",
-                align="edge",
-            )
-        if M > 0:
-            axis[0].bar(
-                tijd,
-                np.array(mach_n),
-                width=breedte,
-                bottom=np.array(base_n)
-                + np.array(boiler_n)
-                + np.array(heatpump_n)
-                + np.array(ev_n),
-                label="Apparatuur",
-                color="brown",
-                align="edge",
-            )
-        axis[0].bar(
-            tijd,
-            np.array(org_t),
-            width=breedte,
-            bottom=np.array(base_n)
-            + np.array(boiler_n)
-            + np.array(heatpump_n)
-            + np.array(ev_n)
-            + np.array(mach_n),
-            label="Teruglev.",
-            color="#0080ff",
-            align="edge",
-        )
-        axis[0].legend(loc="best", bbox_to_anchor=(1.05, 1.00))
-        axis[0].set_ylabel("kW")
-        ylim = math.ceil(max_y)
-        axis[0].set_ylim([-ylim, ylim])
-
-        import matplotlib.dates as mdates
-        from matplotlib.ticker import FuncFormatter
-        maanden = [
-            "jan", "feb", "mrt", "apr", "mei", "jun",
-            "jul", "aug", "sep", "okt", "nov", "dec"
-        ]
-        def nederlandse_datum(x, pos):
-            datum = mdates.num2date(x)
-            return f"{datum.day:02d} {maanden[datum.month - 1]}"
-
-        axis[0].xaxis.set_major_locator(mdates.DayLocator())
-        axis[0].xaxis.set_major_formatter(nederlandse_datum)
-
-        if horizon_extension > 48:
-            hours = [12]
-        elif horizon_extension > 0:
-            hours = [6, 12, 18]
-        else:
-            hours= [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22]
-
-        axis[0].xaxis.set_minor_locator(
-            mdates.HourLocator(byhour=hours)
-        )
-        axis[0].xaxis.set_minor_formatter(
-            mdates.DateFormatter("%H")
-        )
-        axis[0].tick_params(axis="x", which="minor", labelsize=10)
-        axis[0].tick_params(axis="x", which="major", labelsize=12)
-
-        axis[0].set_title(
-            f"Berekend op: {start_dt.strftime('%d-%m-%Y %H:%M')}\nNiet geoptimaliseerd"
-        )
-
-        axis[1].bar(
-            tijd,
-            np.array(pv_p_opt),
-            width=breedte,
-            label="PV AC",
-            color="green",
-            align="edge",
-        )
-        axis[1].bar(
-            tijd,
-            np.array(accu_out_p),
-            width=breedte,
-            bottom=np.array(pv_p_opt),
-            label="Accu uit",
-            color="red",
-            align="edge",
-        )
-        axis[1].bar(
-            tijd,
-            np.array(c_l_p),
-            width=breedte,
-            bottom=np.array(pv_p_opt) + np.array(accu_out_p),
-            label="Levering",
-            color="#00bfff",
-            align="edge",
-        )
-
-        # axis[1].bar(tijd, np.array(cons_n), label="Verbruik", color='yellow')
-        axis[1].bar(
-            tijd, np.array(base_n), width=breedte, label="Overig verbr.", color="#f1a603", align="edge"
-        )
-        if self.boiler_present:
-            axis[1].bar(
-                tijd,
-                np.array(boiler_n),
-                width=breedte,
-                bottom=np.array(base_n),
-                label="Boiler",
-                color="#e39ff6",
-                align="edge",
-            )
-        if self.hp_present:
-            axis[1].bar(
-                tijd,
-                np.array(heatpump_n),
-                width=breedte,
-                bottom=np.array(base_n + np.array(boiler_n)),
-                label="WP",
-                color="#a32cc4",
-                align="edge",
-            )
-        if EV > 0:
-            axis[1].bar(
-                tijd,
-                np.array(ev_n),
-                width=breedte,
-                bottom=np.array(base_n) + np.array(boiler_n) + np.array(heatpump_n),
-                label="EV laden",
-                color="yellow",
-                align="edge",
-            )
-        if M > 0:
-            axis[1].bar(
-                tijd,
-                np.array(mach_n),
-                width=breedte,
-                bottom=np.array(base_n)
-                + np.array(boiler_n)
-                + np.array(heatpump_n)
-                + np.array(ev_n),
-                label="Apparatuur",
-                color="brown",
-                align="edge",
-            )
-        if B > 0:
-            axis[1].bar(
-                tijd,
-                np.array(accu_in_n),
-                width=breedte,
-                bottom=np.array(base_n)
-                + np.array(boiler_n)
-                + np.array(heatpump_n)
-                + np.array(ev_n)
-                + np.array(mach_n),
-                label="Accu in",
-                color="#ff8000",
-                align="edge",
-            )
-        axis[1].bar(
-            tijd,
-            np.array(c_t_n),
-            width=breedte,
-            bottom=np.array(base_n)
-            + np.array(boiler_n)
-            + np.array(heatpump_n)
-            + np.array(ev_n)
-            + np.array(mach_n)
-            + np.array(accu_in_n),
-            label="Teruglev.",
-            color="#0080ff",
-            align="edge",
-        )
-        axis[1].legend(loc="best", bbox_to_anchor=(1.05, 1.00))
-        axis[1].set_ylabel("kW")
-        axis[1].set_ylim([-ylim, ylim])
-        axis[1].xaxis.set_major_locator(mdates.DayLocator())
-        axis[1].xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
-
-        axis[1].xaxis.set_minor_locator(
-            mdates.HourLocator(byhour=hours)
-        )
-        axis[1].xaxis.set_minor_formatter(
-            mdates.DateFormatter("%H")
-        )
-        axis[1].tick_params(axis="x", which="minor", labelsize=10)
-        axis[1].tick_params(axis="x", which="major", labelsize=12)
-
-        axis[1].set_title(
-            f"Day Ahead geoptimaliseerd\nStrategie: {strategie}"
-            f" winst € {(old_cost_da - cost.x):0.2f}"
-        )
-        axis[1].sharex(axis[0])
-
-        # extra tijdstip voor sync aantal uur met laatste soc-waarde
-        # eenmalig, de grafieken hieronder verwachten U+1 tijdstippen
-        span = tijd[U-1] - tijd[U-2]
-        tijd.append(tijd[U-1] + span)
-        breedte.append(breedte[-1])
-
-        gr_no = 1
-        if show_battery_balance:
-            for b in range(B):
-                # make graph of battery
-                gr_no += 1
-                ac_p = []
-                ac_n = []
-                pv_p = []
-                bat_p = []
-                bat_n = []
-                for u in range(U):
-                    # model += (dc_from_ac[b][u] + dc_from_bat[b][u] + pv_prod_dc_sum[b][u] ==
-                    #           dc_to_ac[b][u] + dc_to_bat[b][u])
-                    ac_p.append(dc_from_ac[b][u].x) # * hour_fraction[u])
-                    ac_n.append(-dc_to_ac[b][u].x) # * hour_fraction[u])
-                    if pv_dc_num[b] > 0:
-                        pv_p.append(pv_prod_dc_sum[b][u].x) # * hour_fraction[u])
-                    else:
-                        pv_p.append(0)
-                    bat_p.append(dc_from_bat[b][u].x) # * hour_fraction[u])
-                    bat_n.append(-dc_to_bat[b][u].x) # * hour_fraction[u])
-                # extra uur voor sync aantal uur met laatste soc-waarde
-                ac_p.append(0)
-                ac_n.append(0)
-                pv_p.append(0)
-                bat_p.append(0)
-                bat_n.append(0)
-                leg1 = axis[gr_no].bar(
-                    tijd, np.array(ac_p), width=breedte, label="AC<->", color="red", align="edge"
-                )
-                leg2 = axis[gr_no].bar(
-                    tijd,
-                    np.array(bat_p),
-                    label="BAT<->",
-                    width=breedte,
-                    bottom=np.array(ac_p),
-                    color="blue",
-                    align="edge",
-                )
-                if pv_dc_num[b] > 0:
-                    leg3 = axis[gr_no].bar(
-                        tijd,
-                        np.array(pv_p),
-                        width=breedte,
-                        label="PV->",
-                        bottom=np.array(ac_p) + np.array(bat_p),
-                        color="lime",
-                        align="edge",
-                    )
-                else:
-                    leg3 = None
-                axis[gr_no].bar(tijd, np.array(ac_n), width=breedte, color="red", align="edge")
-                axis[gr_no].bar(
-                    tijd,
-                    np.array(bat_n),
-                    width=breedte,
-                    bottom=np.array(ac_n),
-                    color="blue",
-                    align="edge",
-                )
-                # axis[gr_no].legend(loc='best', bbox_to_anchor=(1.30, 1.00))
-                axis[gr_no].set_ylabel("kW")
-                axis[gr_no].set_ylim([-ylim, ylim])
-
-                axis[gr_no].xaxis.set_major_locator(mdates.DayLocator())
-                axis[gr_no].xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
-
-                axis[gr_no].xaxis.set_minor_locator(
-                    mdates.HourLocator(byhour=hours)
-                )
-                axis[gr_no].xaxis.set_minor_formatter(
-                    mdates.DateFormatter("%H")
-                )
-                axis[gr_no].tick_params(axis="x", which="minor", labelsize=10)
-                axis[gr_no].tick_params(axis="x", which="major", labelsize=12)
-
-                axis[gr_no].set_title(
-                    f"Energiebalans per uur voor {self.battery_options[b].name}"
-                )
-                axis[gr_no].sharex(axis[0])
-                axis_20 = axis[gr_no].twinx()
-                leg4 = axis_20.plot(
-                    tijd, soc_b[b], label="% SoC", linestyle="solid", color="olive"
-                )[0]
-                axis_20.set_ylabel("% SoC")
-                axis_20.set_ylim([0, 102])
-                soc_line = mlines.Line2D([], [], color="olive", label="SoC %")
-                if pv_dc_num[b] > 0:
-                    labels = ["AC<->", "BAT<->", "PV->", "% SoC"]
-                    handles = [leg1, leg2, leg3, leg4]
-                else:
-                    labels = ["AC<->", "BAT<->", "% SoC"]
-                    handles = [leg1, leg2, leg4]
-                axis[gr_no].legend(
-                    handles=handles,
-                    labels=labels,
-                    loc="best",
-                    bbox_to_anchor=(1.35, 1.00),
-                )
-
-        gr_no += 1
-        ln1 = None
-        line_styles = ["solid", "dashed", "dotted"]
-        if len(uur) < U + 1:
-            uur.append("24:00")
-            uur_labels.append("24")
-        if B > 0:
-            ln1 = axis[gr_no].plot(
-                tijd, soc_t, label="SoC", linestyle=line_styles[0], color="olive"
-            )
-        axis[gr_no].xaxis.set_major_locator(mdates.DayLocator())
-        axis[gr_no].xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
-
-        axis[gr_no].xaxis.set_minor_locator(
-            mdates.HourLocator(byhour=hours)
-        )
-        axis[gr_no].xaxis.set_minor_formatter(
-            mdates.DateFormatter("%H")
-        )
-        axis[gr_no].tick_params(axis="x", which="minor", labelsize=10)
-        axis[gr_no].tick_params(axis="x", which="major", labelsize=12)
-
-        axis[gr_no].set_ylabel("% SoC")
-        axis[gr_no].set_xlabel("uren van de dag")
-
-        axis[gr_no].set_ylim([0, 102])
-        axis[gr_no].set_title("Verloop SoC en tarieven")
-        axis[gr_no].sharex(axis[0])
-
         _g = self.config.graphics
         _gx = (_g.model_extra or {}) if _g else {}
 
-        if _g and _g.prices_consumption is not None and "prices delivery" not in _gx:
-            prices_consumption_str = str(_g.prices_consumption)
-        elif "prices delivery" in _gx:
-            prices_consumption_str = str(_gx["prices delivery"])
-            logging.warning(f"Gebruik 'prices consumption' ipv `prices delivery'")
-        else:
-            prices_consumption_str = str(_g.prices_consumption) if _g else "True"
-        prices_consumption = prices_consumption_str.lower() == "true"
-
-        axis22 = axis[gr_no].twinx()
-        if prices_consumption:
-            pl.append(pl[-1])
-            ln2 = axis22.step(
-                tijd,
-                np.array(pl),
-                label="Tarief\nlevering",
-                color="#00bfff",
-                where="post",
-            )
-        else:
-            ln2 = None
-
-        if _g and _g.prices_production is not None and "prices redelivery" not in _gx:
-            prices_production_str = str(_g.prices_production)
-        elif "prices redelivery" in _gx:
-            prices_production_str = str(_gx["prices redelivery"])
-            logging.warning(f"Gebruik 'prices production' ipv `prices redelivery'")
-        else:
-            prices_production_str = str(_g.prices_production) if _g else "True"
-        prices_production = prices_production_str.lower() == "true"
-
-        if prices_production:
-            pt.append(pt[-1])
-            ln3 = axis22.step(
-                tijd,
-                np.array(pt),
-                label="Tarief\nteruglev.",
-                color="green",  # "#0080ff",
-                where="post",
-            )
-        else:
-            ln3 = None
-
-        if str((_g.prices_spot if _g else True) or "true").lower() == "true":
-            p_spot.append(p_spot[-1])
-            if horizon_extension > 0 :
-                tijd_fixed = [value for value in tijd if value <= start_prediction_dt]
-                p_spot_fixed = p_spot[:len(tijd_fixed)]
-                ln5 = axis22.step(
-                    tijd_fixed,
-                    np.array(p_spot_fixed),
-                    label="Spot prices",
-                    color="orange",
-                    where="post"
-                )
-                tijd_pred = [value for value in tijd if value >= start_prediction_dt]
-                p_spot_pred = p_spot[-len(tijd_pred):]
-                ln6 = axis22.step(
-                    tijd_pred,
-                    np.array(p_spot_pred),
-                    label="Pred.spot",
-                    color="orange",
-                    where="post",
-                    linestyle="dashed"
-                )
+        def graph_option(name: str, old_name: str, attr: str) -> bool:
+            if _g and getattr(_g, attr) is not None and old_name not in _gx:
+                value = str(getattr(_g, attr))
+            elif old_name in _gx:
+                value = str(_gx[old_name])
+                logging.warning(f"Gebruik '{name}' ipv `{old_name}'")
             else:
-                ln5 = axis22.step(
-                    tijd,
-                    np.array(p_spot),
-                    label="Spot prijzen",
-                    color="orange",
-                    where="post",
-                )
-                ln6 = None
-        else:
-            ln5 = None
-            ln6 = None
+                value = str(getattr(_g, attr)) if _g else "True"
+            return value.lower() == "true"
 
-        if _g and _g.average_consumption is not None and "average delivery" not in _gx:
-            average_consumption_str = str(_g.average_consumption)
-        elif "average delivery" in _gx:
-            average_consumption_str = str(_gx["average delivery"])
-            logging.warning(f"Gebruik 'average consumption' ipv `average delivery'")
-        else:
-            average_consumption_str = str(_g.average_consumption) if _g else "True"
-        average_consumption = average_consumption_str.lower() == "true"
-
-        if average_consumption:
-            pl_avg.append(pl_avg[-1])
-            ln4 = axis22.plot(
-                tijd,
-                np.array(pl_avg),
-                label="Tarief lev.\ngemid.",
-                linestyle="dashed",
-                color="#00bfff",
+        batteries_graph = []
+        for b in range(B):
+            batteries_graph.append(
+                {
+                    "name": self.battery_options[b].name,
+                    "pv_dc": pv_dc_num[b] > 0,
+                    "ac_p": [dc_from_ac[b][u].x for u in range(U)],
+                    "ac_n": [-dc_to_ac[b][u].x for u in range(U)],
+                    "pv_p": [
+                        pv_prod_dc_sum[b][u].x if pv_dc_num[b] > 0 else 0
+                        for u in range(U)
+                    ],
+                    "bat_p": [dc_from_bat[b][u].x for u in range(U)],
+                    "bat_n": [-dc_to_bat[b][u].x for u in range(U)],
+                    "soc": da_calc_graph.floats(soc_b[b]),
+                }
             )
-        else:
-            ln4 = None
-        axis22.set_ylabel("euro/kWh")
-        axis22.yaxis.set_major_formatter(ticker.FormatStrFormatter("% 1.2f"))
-        bottom, top = axis22.get_ylim()
-        if bottom > 0:
-            axis22.set_ylim([0, top])
-        lns = []
-        if B > 0:
-            lns += ln1
-        if ln2:
-            lns += ln2
-        if ln3:
-            lns += ln3
-        if ln4:
-            lns += ln4
-        if ln5:
-            lns += ln5
-        if ln6:
-            lns += ln6
-        labels = [line.get_label() for line in lns]
-        axis22.legend(lns, labels, loc="best", bbox_to_anchor=(1.40, 1.00))
-
-        plt.subplots_adjust(right=0.75)
-        fig.tight_layout()
-        plt.savefig(
-            "../data/images/calc_" + start_dt.strftime("%Y-%m-%d__%H-%M") + ".png"
+        graph_data = {
+            "version": da_calc_graph.GRAPH_DATA_VERSION,
+            "start_dt": start_dt.isoformat(),
+            "start_prediction_dt": (
+                start_prediction_dt.isoformat() if horizon_extension > 0 else None
+            ),
+            "horizon_extension": horizon_extension,
+            "style": self.config.graphics.style,
+            "show": {
+                "battery_balance": str(self.config.graphics.battery_balance).lower()
+                == "true",
+                "prices_consumption": graph_option(
+                    "prices consumption", "prices delivery", "prices_consumption"
+                ),
+                "prices_production": graph_option(
+                    "prices production", "prices redelivery", "prices_production"
+                ),
+                "prices_spot": str(
+                    (_g.prices_spot if _g else True) or "true"
+                ).lower()
+                == "true",
+                "average_consumption": graph_option(
+                    "average consumption", "average delivery", "average_consumption"
+                ),
+            },
+            "solar": solar_num > 0,
+            "boiler": bool(self.boiler_present),
+            "heatpump": bool(self.hp_present),
+            "ev": EV > 0,
+            "machines": M > 0,
+            "strategie": strategie,
+            "winst": float(old_cost_da - cost.x),
+            "max_y": float(max_y),
+            "tijd": [t.isoformat() for t in tijd[:U]],
+            "series": {
+                name: da_calc_graph.floats(values[:U])
+                for name, values in {
+                    "pv_p_org": pv_p_org,
+                    "pv_ac_p": pv_ac_p,
+                    "pv_p_opt": pv_p_opt,
+                    "org_l": org_l,
+                    "org_t": org_t,
+                    "c_l_p": c_l_p,
+                    "c_t_n": c_t_n,
+                    "base_n": base_n,
+                    "boiler_n": boiler_n,
+                    "heatpump_n": heatpump_n,
+                    "ev_n": ev_n,
+                    "mach_n": mach_n,
+                    "accu_in_n": accu_in_n,
+                    "accu_out_p": accu_out_p,
+                }.items()
+            },
+            "batteries": batteries_graph,
+            "soc_t": da_calc_graph.floats(soc_t),
+            "pl": da_calc_graph.floats(pl[:U]),
+            "pt": da_calc_graph.floats(pt[:U]),
+            "p_spot": da_calc_graph.floats(p_spot[:U]),
+            "pl_avg": da_calc_graph.floats(pl_avg[:U]),
+        }
+        # Only the data is saved; the png is drawn from it the first time it
+        # is opened in the web UI (see da_calc_graph), unless asked for now.
+        da_calc_graph.write_calc_graph(
+            graph_data, "../data/images", draw=bool(self.config.graphics.generate_png)
         )
-        plt.close("all")
         self.notify("DAO calc afgerond", self.notification_berekening)
         return None
 

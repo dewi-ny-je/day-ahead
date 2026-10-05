@@ -5,6 +5,7 @@ from dao.prog.version import __version__
 from subprocess import Popen, DEVNULL
 from pathlib import Path
 from dao.prog.da_report import Report
+from dao.prog import da_calc_graph
 from dao.prog.config.loader import ConfigurationLoader
 
 v2 = Blueprint("v2", __name__)
@@ -76,11 +77,12 @@ def get_file_list_with_ts(path: str, pattern: str) -> list:
     """
     get a time-ordered file list with name and timestamp from filename
     :parameter path: folder
-    :parameter pattern: wildcards to search for
+    :parameter pattern: wildcards to search for, or a tuple of them
     """
+    patterns = (pattern,) if isinstance(pattern, str) else pattern
     flist = []
     for f in os.listdir(path):
-        if fnmatch.fnmatch(f, pattern):
+        if any(fnmatch.fnmatch(f, p) for p in patterns):
             # Extract timestamp from filename (e.g. calc_2026-02-17__08-45.png) because datetime picker works with
             # absolute timestamps and the file modification date might differ from the timestamp in the filename, which is the intended reference time for the user
             m = re.search(r"(\d{4}-\d{2}-\d{2})__(\d{2})[:-](\d{2})(?:[:-](\d{2}))?", f)
@@ -232,6 +234,8 @@ def run_and_log(cmd, state):
 def log_chart(datapath: str, pattern: str):
     #  By design; the get_file_list() is called over and over again to ensure an accurate reflection of the files
     flist = get_file_list_with_ts(app_datapath + datapath, pattern)
+    if datapath == "images/":
+        flist = da_calc_graph.merge_pending(flist)
     last_index = len(flist) - 1
     if len(flist) == 0:
         return None
@@ -295,10 +299,12 @@ def get_solar_items_with_ml():
 @v2.route("/")
 @v2.route("/chart")
 def chart():
-    kwargs = log_chart("images/", "*.png")
+    # charts not drawn yet are listed by their saved data, drawn when shown
+    kwargs = log_chart("images/", ("*.png", da_calc_graph.DATA_PATTERN))
     if kwargs is None:
         return render_template("v2/no-tasks.html", )
 
+    da_calc_graph.ensure_png(app_datapath + "images/", kwargs["filename"])
     kwargs["image"] = url_for('static', filename="data/images/" + kwargs["filename"])
     return render_template(
         "v2/chart.html",
@@ -327,7 +333,10 @@ def delete_file():
     post_data = request.form.to_dict(flat=True)
 
     if post_data["confirm"] == "1" and re.match(r'^(images|log)/[^/]+\.(log|png)$', post_data["file"]):
-        os.remove(app_datapath + post_data["file"])
+        if post_data["file"].startswith("images/"):
+            da_calc_graph.delete_graph(app_datapath + "images/", post_data["file"][len("images/"):])
+        else:
+            os.remove(app_datapath + post_data["file"])
 
     return redirect(url_for('v2.' + post_data["action"], i=post_data["show_index"]))
 

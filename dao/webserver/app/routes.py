@@ -17,6 +17,7 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from dao.prog.config.loader import ConfigurationLoader
 from dao.prog.da_report import Report
+from dao.prog import da_calc_graph
 from dao.prog.version import __version__
 import json
 
@@ -292,11 +293,12 @@ def get_file_list(path: str, pattern: str) -> list:
     """
     get a time-ordered file list with name and timestamp from filename
     :parameter path: folder
-    :parameter pattern: wildcards to search for
+    :parameter pattern: wildcards to search for, or a tuple of them
     """
+    patterns = (pattern,) if isinstance(pattern, str) else pattern
     flist = []
     for f in os.listdir(path):
-        if fnmatch.fnmatch(f, pattern):
+        if any(fnmatch.fnmatch(f, p) for p in patterns):
             # Extract timestamp from filename (e.g. calc_2026-02-17__08-45.png) because datetime picker works with
             # absolut timestamps and then file modification date might differ from the timestamp in the filename, which is the intended reference time for the user
             m = re.search(r"(\d{4}-\d{2}-\d{2})__(\d{2})[:-](\d{2})(?:[:-](\d{2}))?", f)
@@ -408,12 +410,15 @@ def home():
 
     if active_view == "grafiek":
         active_map = "/images/"
-        active_filter = "*.png"
+        # charts not drawn yet are listed by their saved data
+        active_filter = ("*.png", da_calc_graph.DATA_PATTERN)
     else:
         active_map = "/log/"
         active_filter = "*.log"
 
     flist = get_file_list(app_datapath + active_map, active_filter)
+    if active_view == "grafiek":
+        flist = da_calc_graph.merge_pending(flist)
     index = 0
 
     if active_time:
@@ -452,8 +457,13 @@ def home():
                 index = i
 
     if action == "delete" and confirm_delete:
-        os.remove(app_datapath + active_map + flist[index]["name"])
+        if active_view == "grafiek":
+            da_calc_graph.delete_graph(app_datapath + active_map, flist[index]["name"])
+        else:
+            os.remove(app_datapath + active_map + flist[index]["name"])
         flist = get_file_list(app_datapath + active_map, active_filter)
+        if active_view == "grafiek":
+            flist = da_calc_graph.merge_pending(flist)
         index = min(len(flist) - 1, index)
 
     if len(flist) > 0:
@@ -461,6 +471,7 @@ def home():
         # print(flist[index]["name"], datetime.datetime.fromtimestamp(flist[index]["time"]))
         active_time = str(flist[index]["time"])
         if active_view == "grafiek":
+            da_calc_graph.ensure_png(app_datapath + active_map, flist[index]["name"])
             image = os.path.join(web_datapath + active_map, flist[index]["name"])
             tabel = None
         else:

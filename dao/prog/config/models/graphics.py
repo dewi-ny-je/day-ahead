@@ -16,6 +16,15 @@ class GraphicsConfig(BaseModel):
             "x-ui-section": "Graphics",
         },
     )
+    generate_png: bool = Field(
+        alias="generate png",
+        default=False,
+        description="Draw the png chart at the end of every calculation",
+        json_schema_extra={
+            "x-help": "False (default): a calculation only saves the data behind its chart, and the png is drawn the first time you open it in the web UI. This saves several seconds per calculation. True: draw the png right after each calculation, as older versions did. Use this if something outside the web UI reads the png files from data/images.",
+            "x-ui-section": "Graphics",
+        },
+    )
     battery_balance: bool = Field(
         alias="battery balance",
         default=True,
@@ -92,7 +101,7 @@ Graphs can show:
 - Graphs saved to add-on data directory
 - Use dark_background style to match HA theme
 - Toggle individual elements to simplify graphs
-- Graphs regenerated each optimization run
+- Each optimization run saves its chart data; the png is drawn when first opened in the web UI (or right away with "generate png")
 """,
             "x-docs-url": "https://github.com/corneel27/day-ahead/wiki/Graphics",
         },
