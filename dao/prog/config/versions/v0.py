@@ -88,7 +88,7 @@ class ConfigurationV0(DAOConfigBaseModel):
         json_schema_extra={
             "x-ui-group": "DAO",
             "x-ui-section": "Weather",
-            "x-help": "Weather model to fetch from Meteoserver. 'harmonie' is fine-grained but forecasts at most 40 hours ahead; 'gfs' is coarser but forecasts at least 96 hours ahead. When not set, harmonie is used, and when a price prediction extension is configured harmonie is used for the hours it covers and gfs for the hours after that. Forcing 'harmonie' limits the planning horizon to its 40 hours, also with price prediction.",
+            "x-help": "Weather model to fetch from Meteoserver. 'harmonie' is fine-grained but forecasts at most 40 hours ahead; 'gfs' is coarser but forecasts at least 96 hours ahead. When not set, harmonie is used; only when the planning horizon (known day-ahead prices plus the price prediction extension) reaches beyond harmonie is gfs also fetched, for the hours after harmonie. Forcing 'harmonie' limits the planning horizon to its 40 hours, also with price prediction.",
         },
     )
 

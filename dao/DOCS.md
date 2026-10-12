@@ -230,8 +230,10 @@ Er zijn twee modellen:<br>
   
   Deze instelling is optioneel. Als je niets instelt kiest DAO zelf:
   * zonder prijsvoorspelling (`prediction.extension` is 0) wordt "harmonie" gebruikt;
-  * met prijsvoorspelling wordt "harmonie" gebruikt voor de eerste 40 uur en "gfs" voor de uren daarna,
-    zodat de verlengde horizon ook meteodata heeft.<br>
+  * met prijsvoorspelling wordt "harmonie" gebruikt zolang de planningshorizon (bekende day-ahead prijzen
+    plus de verlenging) binnen de 40 uur van harmonie valt. Reikt de horizon verder, dan wordt ook "gfs"
+    opgehaald voor de uren na harmonie, zodat de verlengde horizon ook meteodata heeft. Dat kost dan een
+    extra aanvraag bij meteoserver.<br>
 
   Een ingesteld model wordt altijd gebruikt. Kies je "harmonie", dan blijft de horizon beperkt tot 40 uur, ook met prijsvoorspelling.<br>
   "gfs" is het best bruikbaar voor gebruikers die via een api een langere termijn voorspelling willen van hun pv-productie.

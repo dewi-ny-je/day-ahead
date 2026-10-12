@@ -15,9 +15,6 @@ from sqlalchemy import select, func, and_
 
 # noinspection PyUnresolvedReferences
 class Meteo:
-    # harmonie voorspelt maximaal 40 uur vooruit
-    HARMONIE_HOURS = 40
-
     def __init__(
         self,
         config,
@@ -452,12 +449,27 @@ class Meteo:
             logging.error(f"Fout bij ophalen {model}-data van meteoserver: {ex}")
             return pd.DataFrame()
 
+    def planning_end(self) -> float:
+        """
+        :return: utc timestamp van het einde van de planningshorizon: het einde
+        van de bekende day-ahead prijzen plus de verlenging met voorspelde prijzen
+        """
+        extension = self.config.prices.prediction.extension
+        known_at = self.db_da.get_time_border_record("da")
+        if known_at is None:
+            start = datetime.datetime.now().timestamp()
+        else:
+            # het laatste record is het begin van het laatste uur
+            start = known_at.timestamp() + 3600
+        return start + extension * 3600
+
     def get_forecast(self) -> tuple[pd.DataFrame, str]:
         """
         Haalt de verwachting op van meteoserver.
         Een ingesteld model wordt altijd gebruikt. Zonder ingesteld model wordt
-        harmonie gebruikt; met prijsvoorspelling (langere horizon) wordt
-        harmonie gebruikt voor de eerste (max 40) uur en gfs voor de uren daarna.
+        harmonie gebruikt. Alleen als met prijsvoorspelling de planningshorizon
+        verder reikt dan harmonie (max 40 uur) wordt ook gfs opgehaald, voor de
+        uren na harmonie.
         :return: dataframe met de verwachting en een omschrijving van het model
         """
         if self.meteoserver_model is not None:
@@ -468,13 +480,15 @@ class Meteo:
         if not self.price_prediction_enabled():
             return self.get_from_meteoserver("harmonie"), "harmonie"
         df_harmonie = self.try_get_from_meteoserver("harmonie")
+        if len(df_harmonie) > 0:
+            end_harmonie = df_harmonie["tijd"].iloc[-1] + 3600
+            if end_harmonie >= self.planning_end():
+                return df_harmonie, "harmonie"
         df_gfs = self.try_get_from_meteoserver("gfs")
         if len(df_harmonie) == 0:
             return df_gfs, "gfs"
         if len(df_gfs) == 0:
             return df_harmonie, "harmonie"
-        end_harmonie = df_harmonie["tijd"].iloc[0] + self.HARMONIE_HOURS * 3600
-        df_harmonie = df_harmonie[df_harmonie["tijd"] < end_harmonie]
         df_gfs = df_gfs[df_gfs["tijd"] > df_harmonie["tijd"].iloc[-1]]
         logging.info(
             f"Meteodata: {len(df_harmonie)} uur harmonie, "
