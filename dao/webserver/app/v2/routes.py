@@ -298,7 +298,7 @@ def get_solar_items_with_ml():
 def chart():
     kwargs = log_chart("images/", "*.png")
     if kwargs is None:
-        return render_template("v2/no-tasks.html", )
+        return render_template("v2/no-task.html")
 
     kwargs["image"] = url_for('static', filename="data/images/" + kwargs["filename"])
     return render_template(
@@ -740,49 +740,3 @@ def view_file():
         content=content,
         filename=log_file,
     )
-
-def _alter_hex(hex_color, factor):
-    """
-    factor < 1 = darker
-    """
-    hex_color = hex_color.lstrip("#")
-
-    r = int(hex_color[0:2], 16)
-    g = int(hex_color[2:4], 16)
-    b = int(hex_color[4:6], 16)
-
-    r = max(0, min(255, int(r * factor)))
-    g = max(0, min(255, int(g * factor)))
-    b = max(0, min(255, int(b * factor)))
-
-    return f"#{r:02x}{g:02x}{b:02x}"
-
-def _datasets_config():
-    report = Report(app_datapath + "/options.json")
-    metadata = report.db_da.metadata
-    engine = report.db_da.engine
-
-    variabel = Table("variabel", metadata, autoload_with=engine)
-
-    with engine.connect() as conn:
-        vars = conn.execute(
-            variabel.select()
-        ).fetchall()
-
-    datasets = []
-
-    for row in vars:
-        color = "#ffffff"
-
-        datasets.append({
-            "label": row.name,
-            "code": row.code,
-            "borderColor": _alter_hex(color, 0.8),
-            "backgroundColor": color,
-            "type": "bar" if row.dim == "kWh" else "line",
-            "stepped": True if row.dim == "euro/kWh" else False,
-            "yAxisID": f"y_{row.dim}",
-            "unit": row.dim,
-        })
-
-    return datasets

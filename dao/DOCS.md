@@ -1445,7 +1445,7 @@ Je zult zelf in HA nog de volgende zaken moeten configureren:
 ```
   rest_command:
     start_dao_calc:
-      url: http://<ip-address>:<port>/api/run/calc_zonder_debug
+      url: http://<ip-address>:<port>/api/run/calc_optimum
       verify_ssl: false
 ```
 * Hierbij zijn ip-address het ip-adres van de machine waarop DAO draait
@@ -1636,13 +1636,16 @@ Het ```<ip-adres>``` en de```<ip-poort>``` zijn hetzelfde als bij het dashboard.
 Met dit onderdeel van de api kun je via het dashboard alle berekeningen en bewerkingen
 van het programma starten. Dit kan met **curl** maar ook kun je hiermee vanuit Home Assistant een bewerking of berekening uitvoeren. <br/>
 Bij ```<commando>``` vul je een van de volgende commando's in:<br />
-* ```calc_zonder_debug```: een optimaliseringsberekening wordt uitgevoerd. 
+* ```calc_optimum```: een optimaliseringsberekening wordt uitgevoerd. 
 De resultaten worden doorgezet naar Home Assistant.<br />  
-* ```calc_met_debug```: een optimaliseringsbereking wordt uitgevoerd. De resultaten worden **niet**
+* ```calc_optimum_met_debug```: een optimaliseringsbereking wordt uitgevoerd. De resultaten worden **niet**
 doorgezet naar Home Assistant.
-* ```get_tibber```: haalt verbruiksgegevens (consumption, production, cost, profit) op bij Tibber en slaat deze op in de database<br/>
-* ```get_meteo```: haalt prognose van meteogegevens op bij Meteoserver en slaat deze op in de database
-* ```get_prices```: haalt de day-ahead prijzen voor de volgende dag op en slaat deze op in de database<br/>
+* ```tibber```: haalt verbruiksgegevens (consumption, production, cost, profit) op bij Tibber en slaat deze op in de database<br/>
+* ```meteo```: haalt prognose van meteogegevens op bij Meteoserver en slaat deze op in de database
+* ```prices```: haalt de day-ahead prijzen voor de volgende dag op en slaat deze op in de database<br/>
+* ```predicted_prices```, ```calc_baseloads```, ```train_ml_predictions``` en ```clean```: dezelfde taken als in het scheduler-overzicht.
+
+De oude namen ```calc_zonder_debug```, ```calc_met_debug```, ```get_tibber```, ```get_meteo``` en ```get_prices``` werken nog steeds.<br/>
 
 Een uitgewerkt voorbeeld hoe je vanuit Home Assistant een berekening kunt starten:<br/>
 - Maak een (of meer) rest-commands aan. <br/>
@@ -1650,7 +1653,7 @@ Een uitgewerkt voorbeeld hoe je vanuit Home Assistant een berekening kunt starte
     ````
     rest_command:
       start_dao_calc:
-        url: http://192.168.178.36:5000/api/run/calc_zonder_debug
+        url: http://192.168.178.36:5000/api/run/calc_optimum
         verify_ssl: false
     ````
 -   Maak een helper aan Home Assistant bijvoorbeeld: ```input_button.start_day_ahead_berekening``` en

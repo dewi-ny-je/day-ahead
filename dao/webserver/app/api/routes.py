@@ -45,8 +45,20 @@ def api_report(fld: str, periode: str):
     return result, headers
 
 
+# Namen die /api/run/ vroeger accepteerde en die in bestaande HA-automatiseringen
+# (rest_command) staan; ze verwijzen naar de huidige taken.
+LEGACY_TASK_NAMES = {
+    "calc_zonder_debug": "calc_optimum",
+    "calc_met_debug": "calc_optimum_met_debug",
+    "get_tibber": "tibber",
+    "get_meteo": "meteo",
+    "get_prices": "prices",
+}
+
+
 @api.route("/run/<string:task>", methods=["GET", "POST"])
 def run_api(task: str):
+    task = LEGACY_TASK_NAMES.get(task, task)
     if task in tasks.keys():
         proc = subprocess_run(
             tasks[task]["cmd"],

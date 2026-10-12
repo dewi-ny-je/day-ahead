@@ -3,7 +3,7 @@ Reporting configuration models.
 """
 
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import AliasChoices, BaseModel, Field, ConfigDict
 from .base import EntityId
 
 
@@ -123,6 +123,8 @@ class ReportConfig(BaseModel):
     co2_intensity_sensor: Optional[list[EntityId]] | Optional[EntityId] = Field(
         default=[],
         alias="entity co2-intensity",
+        # "co2 intensity sensor" is de naam uit eerdere versies
+        validation_alias=AliasChoices("entity co2-intensity", "co2 intensity sensor"),
         description="HA entity for CO2 intensity",
         json_schema_extra={
             "x-help": "Optional: Home Assistant sensor for grid CO2 intensity (gCO2/kWh). Used to calculate and report carbon footprint of electricity usage.",

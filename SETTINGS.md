@@ -1327,7 +1327,7 @@ System uses tariff active on optimization date.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `source day ahead` | string | No | `"nordpool"` | Source for day-ahead prices. Options: `nordpool`, `entsoe`, `tibber` |
-| `prediction` | [PricePrediction](#priceprediction) (optional) | No | `null` | Configuration of getting and using priceprediction beyond the day ahead spotprices of epex. |
+| `prediction` | [PricePrediction](#priceprediction) | No | _See nested fields_ | Configuration of getting and using priceprediction beyond the day ahead spotprices of epex. |
 | `entsoe-api-key` | [SecretStr](#secretstr) (optional) | No | `null` | ENTSO-E API key (can use !secret) _Required for entsoe source, use !secret_ |
 | `energy taxes consumption` | object | Yes | — | Energy taxes for consumption by date (YYYY-MM-DD -> euro/kWh ex VAT) (Unit: `€/kWh`) _Dict with YYYY-MM-DD keys, float values (ex VAT)_ |
 | `energy taxes production` | object | Yes | — | Energy taxes for production by date (YYYY-MM-DD -> euro/kWh ex VAT) (Unit: `€/kWh`) _Dict with YYYY-MM-DD keys, float values (ex VAT)_ |
@@ -2012,9 +2012,9 @@ Power profile as list of watts per time interval. Length defines program duratio
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `extension` | integer (optional) | No | `0` | The amount of hours the planninghorizon is extended beyond the horizon of the regular day ahead prices (Unit: `h`) |
-| `source` | string (optional) | No | `"dap"` | The name of the supplier of prediction data, now there is support for epexpredictor, dap and energypriceforecast_eu |
-| `api` | string (optional) | No | `"https://raw.githubusercontent.com/corneel27/day-ahead-prediction/main/dap/data/prediction.json"` | The url of the supplier of prediction data, with which DAO can get the prediction data  |
+| `extension` | integer | No | `0` | The amount of hours the planninghorizon is extended beyond the horizon of the regular day ahead prices (Unit: `h`) |
+| `source` | string | No | `"dap"` | The name of the supplier of prediction data, now there is support for epexpredictor, dap and energypriceforecast_eu. Options: `epexpredictor`, `energypriceforecast_eu`, `dap` |
+| `api` | string | No | `"https://raw.githubusercontent.com/corneel27/day-ahead-prediction/main/dap/data/prediction.json"` | The url of the supplier of prediction data, with which DAO can get the prediction data  |
 
 <details>
 <summary><b>📖 Field Details</b> (click to expand)</summary>

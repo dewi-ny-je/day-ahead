@@ -266,7 +266,19 @@ TIER_A_INVARIANTS: list[Invariant] = [
 
 
 def run_tier_a(rc: ResultContext) -> list[CheckResult]:
-    return [inv.check(rc) for inv in TIER_A_INVARIANTS]
+    results = []
+    for inv in TIER_A_INVARIANTS:
+        try:
+            result = inv.check(rc)
+        except Exception as ex:  # noqa: BLE001
+            # an infeasible solve leaves var.x at None; report it instead of
+            # crashing the whole scenario-run
+            result = CheckResult(inv.name, False, f"check raised {type(ex).__name__}: {ex}")
+        results.append(result)
+        if isinstance(inv, Solved) and not result.ok:
+            # the other invariants read the solution, which does not exist
+            break
+    return results
 
 
 # --- Setup checks --------------------------------------------------------

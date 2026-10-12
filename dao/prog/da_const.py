@@ -29,6 +29,7 @@ tasks = {
         "cmd": ["python3", "day_ahead.py", "prices"],
         "function": "get_day_ahead_prices",
         "file_name": "prices",
+        "parameters": ["prijzen_start", "prijzen_tot"],
     },
     "calc_baseloads": {
         "name": "Bereken de baseloads",

@@ -424,7 +424,6 @@ class DBmanagerObj(object):
                 )
             )
             if end is not None:
-                end_dt = datetime.datetime.fromtimestamp(end)
                 query = query.where(
                     t1.c.time < end  # self.unix_timestamp(end_dt.strftime("%Y-%m-%d %H:%M:%S"))
                 )
@@ -544,7 +543,9 @@ class DBmanagerObj(object):
             result = connection.execute(query)
         df = pd.DataFrame(result.fetchall(), columns=result.keys())
         if agg_func is not None:
-            df = df.groupby("uur").agg(
+            # op het utc-uur groeperen, niet op de lokale "uur"-tekst: in de
+            # nacht van de wintertijd komt 02:00 lokaal twee keer voor
+            df = df.groupby(df["utc"] // 3600).agg(
                 {
                     "uur": "min",
                     "time": "min",
@@ -552,6 +553,7 @@ class DBmanagerObj(object):
                     "value": "mean" if agg_func == "avg" else "sum",
                 }
             )
+            df.index = df["uur"].rename(None)
         now_ts = datetime.datetime.now().timestamp()
         df["datasoort"] = np.where(df["time"] <= now_ts, "recorded", "expected")
         df["time"] = df["time"].apply(

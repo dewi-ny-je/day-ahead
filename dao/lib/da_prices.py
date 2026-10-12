@@ -42,7 +42,10 @@ class DaPrices:
         else:
             start = _start
         # end
-        if _end is None:
+        if _end is None and _start is not None:
+            # alleen een startdatum: die dag ophalen, niet alles tot vandaag
+            end = start + datetime.timedelta(days=1)
+        elif _end is None:
             end = pd.Timestamp(
                 year=now.year, month=now.month, day=now.day, tz="CET"
             )
@@ -436,24 +439,42 @@ class DaPrices:
     def get_predicted_prices(self):
         source = self.config.prices.prediction.source
         api_url = self.config.prices.prediction.api
-        extension = 96
-        if extension == 0:
+        configured = self.config.prices.prediction.extension
+        if not configured:
             logging.warning("predicted horizon extension is 0, no predicted prices are returned")
             return
-        known_at = self.db_da.get_time_border_record("da").astimezone()
+        # altijd minstens 96 uur ophalen (als de bron ze heeft), meer als dat
+        # is ingesteld
+        extension = max(configured, 96)
+        known_at = self.db_da.get_time_border_record("da")
+        if known_at is None:
+            logging.warning(
+                "Er staan nog geen day-ahead prijzen in de database, "
+                "er worden geen voorspelde prijzen opgehaald"
+            )
+            return
+        known_at = known_at.astimezone()
         new_horizon = known_at + datetime.timedelta(hours=extension)
         now = datetime.datetime.now().astimezone()
         fetch_hours = math.ceil((new_horizon - now).total_seconds()/3600)
         api_url= api_url.replace("<hours>", str(fetch_hours))
         api_url= api_url.replace("<region>", self.country)
-        resp = get(api_url)
+        try:
+            resp = get(api_url, timeout=60)
+        except Exception as ex:
+            logging.error(f"No data from {source} off predict prices: {ex}")
+            return
         if resp.status_code != 200:
             logging.error(f"No data from {source} off predict prices, "
                           f"statuscode: {resp.status_code},"
                           f"message: {resp.text}")
             return resp.status_code
         logging.debug(resp.text)
-        json_object = json.loads(resp.text)
+        try:
+            json_object = json.loads(resp.text)
+        except ValueError as ex:
+            logging.error(f"No valid json from {source} off predict prices: {ex}")
+            return
         extract_data_f = "extract_data_"+source
         df_db = getattr(self, extract_data_f)(json_object, known_at, new_horizon)
         logging.info(
@@ -462,16 +483,3 @@ class DaPrices:
         )
         self.db_da.savedata(df_db, tablename="prognoses")
         return 0
-
-    def get_price_prediction(self, source:str="dap"):
-        if source.lower() == "dap":
-            url = (f"https://raw.githubusercontent.com/corneel27/day-ahead-prediction/main/dap/data/prediction.json")
-            resp = get(url)
-            logging.debug(resp.text)
-            json_object = json.loads(resp.text)
-            df = pd.DataFrame.from_records(json_object)
-            df.rename(columns={"time":"time_dt", "time_ts":"time", "prediction":"value"}, inplace=True)
-            df["code"] = "da"
-            # save
-            print(df.to_string(index=False))
-            self.db_da.savedata(df, "prognoses")

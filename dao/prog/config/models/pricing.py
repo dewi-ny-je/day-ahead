@@ -8,7 +8,7 @@ from .base import SecretStr
 from datetime import date
 
 class PricePrediction(BaseModel):
-    extension: Optional[int] = Field (
+    extension: int = Field (
         default=0,
         ge=0,
         description="The amount of hours the planninghorizon is extended beyond the horizon of the regular day ahead prices",
@@ -18,7 +18,7 @@ class PricePrediction(BaseModel):
             "x-ui-section": "Prices",
         },
     )
-    source: Optional[Literal["epexpredictor", "energypriceforecast_eu", "dap"]] = Field (
+    source: Literal["epexpredictor", "energypriceforecast_eu", "dap"] = Field (
         default="dap",
         description="The name of the supplier of prediction data, now there is support for epexpredictor, dap and energypriceforecast_eu",
         json_schema_extra={
@@ -26,7 +26,7 @@ class PricePrediction(BaseModel):
             "x-ui-section": "Prices",
         },
     )
-    api: Optional[str] = Field (
+    api: str = Field (
         default="https://raw.githubusercontent.com/corneel27/day-ahead-prediction/main/dap/data/prediction.json",
         description="The url of the supplier of prediction data, with which DAO can get the prediction data ",
         json_schema_extra={
@@ -50,7 +50,7 @@ class PricingConfig(BaseModel):
             "x-ui-section": "Prices",
         },
     )
-    prediction: Optional[PricePrediction] = Field(
+    prediction: PricePrediction = Field(
         default_factory = PricePrediction,
         description="Configuration of getting and using priceprediction beyond the day ahead spotprices of epex.",
         json_schema_extra={

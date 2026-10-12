@@ -535,6 +535,8 @@ class RecordingIO:
         self._primary = None  # first DaBase-family instance constructed
         self._price_data: Optional[pd.DataFrame] = None
         self._price_data_args: Optional[dict] = None
+        # de staart met voorspelde prijzen (extension > 0), los van de vaste prijzen
+        self._price_tail: Optional[pd.DataFrame] = None
         self._prog_data: Optional[pd.DataFrame] = None
         self._ha_states: dict[str, str] = {}
         self._baseload: dict[str, list] = {}
@@ -629,8 +631,14 @@ class RecordingIO:
         original_get_price_data = Report.get_price_data
 
         # Roept Report.get_price_data echt aan en bewaart het teruggegeven DataFrame.
-        def _wrapped_get_price_data(instance, start, end=None, interval="1hour"):
-            result = original_get_price_data(instance, start, end=end, interval=interval)
+        def _wrapped_get_price_data(instance, start, end=None, interval="1hour", extension: int = 0):
+            result = original_get_price_data(
+                instance, start, end=end, interval=interval, extension=extension
+            )
+            if extension:
+                # tweede aanroep van DaCalc: alleen de voorspelde staart
+                self._price_tail = result
+                return result
             self._price_data = result
             self._price_data_args = {
                 "start": str(start),
@@ -791,6 +799,9 @@ class RecordingIO:
             if self._price_data is not None
             else None,
             "price_data_args": self._price_data_args,
+            "price_tail": _dataframe_to_payload(self._price_tail)
+            if self._price_tail is not None
+            else None,
             "prog_data": _dataframe_to_payload(self._prog_data)
             if self._prog_data is not None
             else None,
@@ -943,6 +954,12 @@ class ReplayIO:
             if self._snapshot.get("price_data") is not None
             else None
         )
+        # oudere snapshots hebben geen staart: dan wordt er zonder verlenging gerekend
+        self._price_tail = (
+            _dataframe_from_payload(self._snapshot["price_tail"])
+            if self._snapshot.get("price_tail") is not None
+            else None
+        )
         self._prog_data = (
             _dataframe_from_payload(self._snapshot["prog_data"])
             if self._snapshot.get("prog_data") is not None
@@ -1090,6 +1107,12 @@ class ReplayIO:
 
         # Levert de opgeslagen prijsdata terug in plaats van een databasequery uit te voeren.
         def _replay_get_price_data(instance, start, end=None, interval="1hour", extension:int=0):
+            if extension:
+                # de staart met voorspelde prijzen apart, anders worden de
+                # vaste prijzen twee keer achter elkaar gezet
+                if self._price_tail is None:
+                    return self._price_data.iloc[0:0].copy() if self._price_data is not None else pd.DataFrame()
+                return self._price_tail.copy()
             if self._price_data is None:
                 raise SnapshotMiss(
                     f"ReplayIO ({self._source}): snapshot has no price_data."
