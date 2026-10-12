@@ -14,7 +14,7 @@ import sys
 import math
 import pandas as pd
 from contextlib import contextmanager
-from mip import Model, xsum, minimize, BINARY, CONTINUOUS, INTEGER
+from mip import Model, xsum, minimize, BINARY, CONTINUOUS, INTEGER, CBC
 from pandas.core.dtypes.inference import is_number
 from dao.prog.da_report import Report
 from dao.prog.ev_schedule import format_ev_charge_schedule
@@ -501,7 +501,8 @@ class DaCalc(DaBase):
             logging.info(f"pv_ac: {len(pv_org_ac)}")
             logging.info(f"pv_dc: {len(pv_org_dc)}")
 
-        model = Model()
+        # Name the solver explicitly to avoid trying Gurobi first
+        model = Model(solver_name=CBC)
 
         ##############################################################
         #                          pv ac
@@ -5317,7 +5318,7 @@ class DaCalc(DaBase):
 
         plt.subplots_adjust(right=0.75)
         fig.tight_layout()
-        plt.savefig(
+        fig.savefig(
             "../data/images/calc_" + start_dt.strftime("%Y-%m-%d__%H-%M") + ".png"
         )
         plt.close("all")

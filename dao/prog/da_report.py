@@ -32,7 +32,6 @@ from sqlalchemy import (
     union,
 )
 import matplotlib.pyplot as plt
-from sklearn.metrics import r2_score
 
 
 # Rapportage-intervallen die een deel van een dag beschrijven.
@@ -58,6 +57,9 @@ def interval_delta(interval: str) -> datetime.timedelta:
 def calc_r2(serie_x: pd.Series, serie_y: pd.Series) -> float:
     if serie_x.count() < 24 or serie_y.count() < 24:
         return pd.NA
+    # imported here to speed up the runs which don't need it
+    from sklearn.metrics import r2_score
+
     return r2_score(serie_x, serie_y)
 
 
