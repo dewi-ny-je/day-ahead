@@ -444,6 +444,14 @@ class Meteo:
         prices = getattr(self.config, "prices", None)
         return prices is not None and prices.prediction.extension > 0
 
+    def try_get_from_meteoserver(self, model: str) -> pd.DataFrame:
+        # een fout bij het ene model mag de data van het andere niet kosten
+        try:
+            return self.get_from_meteoserver(model)
+        except Exception as ex:
+            logging.error(f"Fout bij ophalen {model}-data van meteoserver: {ex}")
+            return pd.DataFrame()
+
     def get_forecast(self) -> tuple[pd.DataFrame, str]:
         """
         Haalt de verwachting op van meteoserver.
@@ -459,8 +467,8 @@ class Meteo:
             )
         if not self.price_prediction_enabled():
             return self.get_from_meteoserver("harmonie"), "harmonie"
-        df_harmonie = self.get_from_meteoserver("harmonie")
-        df_gfs = self.get_from_meteoserver("gfs")
+        df_harmonie = self.try_get_from_meteoserver("harmonie")
+        df_gfs = self.try_get_from_meteoserver("gfs")
         if len(df_harmonie) == 0:
             return df_gfs, "gfs"
         if len(df_gfs) == 0:
