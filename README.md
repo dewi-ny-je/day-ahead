@@ -5,6 +5,40 @@
 [aarch64-shield]: https://img.shields.io/badge/aarch64-yes-green.svg
 [amd64-shield]: https://img.shields.io/badge/amd64-yes-green.svg
 
+## About this fork
+
+This fork of [corneel27/day-ahead](https://github.com/corneel27/day-ahead) adds fixes and
+features that were not accepted upstream, either because their usefulness was not
+recognised or because they were generated with LLMs. This fork is entirely LLM-driven:
+its changes are written, reviewed and merged with the help of large language models.
+The branch `dev` follows upstream `main` and carries everything listed below.
+
+### Features not in upstream
+
+| Feature | Purpose |
+| --- | --- |
+| Faster optimisation runs | Cuts about 1.5 s of fixed overhead from every calculation (lazy imports, no needless redraws). |
+| Calculation chart on demand | Saves the chart data after each run and draws the PNG only when it is opened in the web UI; `graphics` -> `generate png` restores the old behaviour. |
+| Bar series as one collection | Draws each bar series of the calculation chart as one collection, so 15-minute charts render much faster with identical output. |
+| Production bonus | Configurable bonus on feed-in (for example the Zonneplan Zonnebonus), from upstream PR 878, which is not merged there yet. |
+| Configuration reload | Every process picks up a changed `options.json` or `secrets.json` without a restart, so the dashboard and the API use the same settings as the calculation. |
+| Legacy API at the optimiser interval | `/api/report/...` returns quarter-hour values when the optimiser runs at `15min`. |
+| Same irradiance for ML and DAO solar predictions | Both predictors are fed the same measured/forecast irradiance, so their results can be compared. |
+| Release workflows | The version is typed once in `dao/config.yaml`, and the image is built for a single architecture when that is all you need. |
+| Development setup | `run_dev.sh` detects and repairs a broken virtual environment; the Vite dev server works from another machine, behind a proxy and with several network addresses; troubleshooting notes in `DEVELOP.md`. |
+
+### Fixes not in upstream
+
+| Fix | Purpose |
+| --- | --- |
+| Battery value at the end of the horizon | Averages the DC-to-AC efficiency over the power axis, not over table rows. |
+| Cancelled tasks | A cancelled task stays "cancelled" instead of being reported as an error. |
+| Database table reflection | Thread safe, so concurrent API calls no longer crash. |
+| 2026.10.0.rc1 issues | Calculation without predicted prices, price backfill range, debug capture, baseload in the prediction tail, day of the 00:00 run, old `/api/run` names, legacy UI under HA ingress, Reports V2 chart race, EV schedule length, DST night in the prognoses, null prediction settings, old CO2 setting name. |
+| Smaller fixes | Empty-state page of the v2 chart view, Sass deprecation warnings, `.DS_Store` ignored. |
+
+---
+
 ## Inleiding
 Het programma Day Ahead Optimizer (DAO) voert de volgende acties, 
 berekeningen en bewerkingen uit: 
