@@ -146,7 +146,8 @@ class DaCalc(DaBase):
             dt.datetime.fromtimestamp(start_hour), end=None, interval=self.interval,
             extension=0
         )
-        if horizon_extension > 0:
+        pred_price_data = None
+        if horizon_extension > 0 and len(fixed_price_data) > 0:
             start_prediction_dt = fixed_price_data["time"].iloc[-1] + dt.timedelta(seconds=self.interval_s)
             start_prediction_dt = start_prediction_dt.to_pydatetime()
             start_prediction_ts = start_prediction_dt.timestamp()
@@ -154,9 +155,16 @@ class DaCalc(DaBase):
                 start_prediction_dt, end=None, interval="1hour",
                 extension=horizon_extension
             )
-            price_data = pd.concat([fixed_price_data, pred_price_data])
-        else:
+        if pred_price_data is None or len(pred_price_data) == 0:
+            if horizon_extension > 0:
+                logging.warning(
+                    f"Er zijn geen voorspelde prijzen na de day-ahead tarieven, "
+                    f"er wordt gerekend zonder verlenging van de horizon"
+                )
+            horizon_extension = 0
             price_data = fixed_price_data
+        else:
+            price_data = pd.concat([fixed_price_data, pred_price_data])
         if len(price_data) <= 5:
             logging.error(
                 f"Er ontbreken kwartier- of uurwaarden van de day-ahead tarieven, "
@@ -253,7 +261,9 @@ class DaCalc(DaBase):
         # base load
         if self.use_calc_baseload:
             logging.info(f"Zelf berekende baseload")
-            weekday = dt.datetime.weekday(dt.datetime.now())
+            # de dag van de berekening, niet de klok: de run van 00:00 start
+            # een paar seconden eerder en hoort al bij de nieuwe dag
+            weekday = start_dt.weekday()
             base_cons = self.get_calculated_baseload(weekday)
             if len(fixed_price_data) > self.steps_day:
                 # volgende dag ophalen
@@ -262,7 +272,9 @@ class DaCalc(DaBase):
         else:
             logging.info(f"Baseload uit instellingen")
             base_cons = self.config.baseload
-            if len(fixed_price_data) >= self.steps_day:
+            # net als hierboven: alleen bij meer dan een dag de volgende dag
+            # erbij, anders schuift de staart een dag op
+            if len(fixed_price_data) > self.steps_day:
                 base_cons = base_cons + base_cons
         if self.interval == "15min":
             start = dt.datetime(
@@ -2250,15 +2262,15 @@ class DaCalc(DaBase):
             )
             if not self.hp_enabled:
                 logging.info("Warmtepomp staat uit - warmtepomp wordt niet ingepland")
+        # de dag van de berekening, niet de klok (zie de baseload)
+        calc_day = dt.datetime.combine(start_dt.date(), dt.datetime.min.time())
         if self.hp_enabled:
             # degree days
-            degree_days_today = self.meteo.calc_graaddagen(weighted=True)
+            degree_days_today = self.meteo.calc_graaddagen(date=calc_day, weighted=True)
             logging.info(f"Gewogen graaddagen vandaag: {degree_days_today:.1f} K.day")
             if U > self.steps_day:
                 degree_days_tomorrow = self.meteo.calc_graaddagen(
-                    date=dt.datetime.combine(
-                        dt.date.today() + dt.timedelta(days=1), dt.datetime.min.time()
-                    ),
+                    date=calc_day + dt.timedelta(days=1),
                     weighted=True,
                 )
                 logging.info(
@@ -2351,16 +2363,13 @@ class DaCalc(DaBase):
                 logging.info(f"Beschikbaar zijn: {hours_avail} uur")
                 if heat_needed > 0:
                     logging.info(f"On/off warmtepomp wordt ingepland")
-                    avg_temp_today = self.meteo.get_avg_temperature()
+                    avg_temp_today = self.meteo.get_avg_temperature(date=calc_day)
                     logging.info(
                         f"Gem. buitentemperatuur vandaag: {avg_temp_today:.1f} °C"
                     )
                     if U > self.steps_day:
                         avg_temp_tomorrow = self.meteo.get_avg_temperature(
-                            date=dt.datetime.combine(
-                                dt.date.today() + dt.timedelta(days=1),
-                                dt.datetime.min.time(),
-                            )
+                            date=calc_day + dt.timedelta(days=1)
                         )
                         logging.info(
                             f"Gem. buitentemperatuur morgen: {avg_temp_tomorrow:.1f} °C"
@@ -4060,7 +4069,29 @@ class DaCalc(DaBase):
                             f"'{entity_charging_schedule}' zijn geschreven"
                         )
                     else:
-                        self.set_value(entity_charging_schedule, charging_schedule)
+                        # een mislukte schrijfactie mag de aansturing van de
+                        # lader, batterij, warmtepomp en apparaten niet afbreken
+                        try:
+                            max_len = 255
+                            try:
+                                attributes = getattr(
+                                    self.get_state(entity_charging_schedule), "attributes", {}
+                                ) or {}
+                                max_len = int(attributes.get("max", max_len))
+                            except Exception:
+                                pass
+                            if len(charging_schedule) > max_len:
+                                logging.warning(
+                                    f"Laadschema voor {self.ev_options[e].name} is langer "
+                                    f"dan {max_len} tekens en wordt ingekort"
+                                )
+                                charging_schedule = charging_schedule[:max_len]
+                            self.set_value(entity_charging_schedule, charging_schedule)
+                        except Exception as ex:
+                            logging.error(
+                                f"Laadschema kon niet naar '{entity_charging_schedule}' "
+                                f"worden geschreven: {ex}"
+                            )
                 entity_charge_switch = self.ev_options[e].charge_switch
                 entity_charging_ampere = self.ev_options[e].entity_set_charging_ampere
                 if ev_instant_charge[e]:

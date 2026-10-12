@@ -6,7 +6,7 @@ import time
 
 # from sqlalchemy.sql.coercions import expect_col_expression_collection
 
-from flask import Blueprint, render_template, request, jsonify, session as flask_session
+from flask import Blueprint, render_template, request, jsonify, session as flask_session, url_for
 from markupsafe import escape
 import fnmatch
 import os
@@ -416,7 +416,8 @@ def home():
         # print(flist[index]["name"], datetime.datetime.fromtimestamp(flist[index]["time"]))
         active_time = str(flist[index]["time"])
         if active_view == "grafiek":
-            image = os.path.join(web_datapath + active_map, flist[index]["name"])
+            # via url_for, zodat het pad ook achter HA-ingress klopt
+            image = url_for("static", filename="data" + active_map + flist[index]["name"])
             tabel = None
         else:
             image = None

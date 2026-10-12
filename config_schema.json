@@ -2140,54 +2140,33 @@
     "PricePrediction": {
       "properties": {
         "extension": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
           "default": 0,
           "description": "The amount of hours the planninghorizon is extended beyond the horizon of the regular day ahead prices",
+          "minimum": 0,
           "title": "Extension",
+          "type": "integer",
           "x-help": "The amount of hours the planninghorizon is extended beyond the horizon of the regular day ahead prices",
           "x-ui-section": "Prices",
           "x-unit": "h"
         },
         "source": {
-          "anyOf": [
-            {
-              "enum": [
-                "epexpredictor",
-                "energypriceforecast_eu",
-                "dap"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
           "default": "dap",
           "description": "The name of the supplier of prediction data, now there is support for epexpredictor, dap and energypriceforecast_eu",
+          "enum": [
+            "epexpredictor",
+            "energypriceforecast_eu",
+            "dap"
+          ],
           "title": "Source",
+          "type": "string",
           "x-help": "The name of the supplier of prediction data, now there is support for epexpredictor, dap and energypriceforecast_eu",
           "x-ui-section": "Prices"
         },
         "api": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
           "default": "https://raw.githubusercontent.com/corneel27/day-ahead-prediction/main/dap/data/prediction.json",
           "description": "The url of the supplier of prediction data, with which DAO can get the prediction data ",
           "title": "Api",
+          "type": "string",
           "x-help": "The url of the supplier to get the prediction datafor Epexpredictor: https://epexpredictor.batzill.com/prices?region=<region>&hours=<hours>for energypriceforecast.eu: https://api.energypriceforecast.eu/api/v1/dao/prices?country=<region>&hours=<hours>for da_prediction: https://raw.githubusercontent.com/corneel27/day-ahead-prediction/main/dap/data/prediction.json",
           "x-ui-section": "Prices"
         }
@@ -2213,14 +2192,7 @@
           "x-ui-section": "Prices"
         },
         "prediction": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PricePrediction"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "$ref": "#/$defs/PricePrediction",
           "description": "Configuration of getting and using priceprediction beyond the day ahead spotprices of epex.",
           "x-help": "Configuration of getting and using priceprediction beyond the day ahead spotprices of epex.",
           "x-ui-section": "Prices",
