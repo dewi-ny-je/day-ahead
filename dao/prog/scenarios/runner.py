@@ -120,8 +120,8 @@ def _capture_root_log():
 
 
 def _expected_png_path(module_dir: Path, start) -> Path:
-    """Where day_ahead.py's unconditional plt.savefig(...) (L5080-5081)
-    lands: a path relative to cwd, which day_ahead.py assumes is its own
+    """Where the png drawn by da_debug's --png chart writer (see
+    da_debug._make_calc_graph_writer) lands: a path relative to cwd, which day_ahead.py assumes is its own
     directory (dao/prog), the same assumption da_debug's own capture and
     replay commands make. run_scenario chdirs there for the duration of
     the solve when keep_png=True, so this resolves correctly regardless of
