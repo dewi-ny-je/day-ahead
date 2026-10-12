@@ -21,6 +21,7 @@ The branch `dev` follows upstream `main` and carries everything listed below.
 | Calculation chart on demand | Saves the chart data after each run and draws the PNG only when it is opened in the web UI; `graphics` -> `generate png` restores the old behaviour. |
 | Bar series as one collection | Draws each bar series of the calculation chart as one collection, so 15-minute charts render much faster with identical output. |
 | Production bonus | Configurable bonus on feed-in (for example the Zonneplan Zonnebonus), from upstream PR 878, which is not merged there yet. |
+| Mixed weather models | Without a configured `meteoserver-model`, uses harmonie for the first 40 hours and gfs for the hours after when price prediction extends the horizon, so the extended hours also get weather data; harmonie only otherwise. A configured model is always used. |
 | Configuration reload | Every process picks up a changed `options.json` or `secrets.json` without a restart, so the dashboard and the API use the same settings as the calculation. |
 | Legacy API at the optimiser interval | `/api/report/...` returns quarter-hour values when the optimiser runs at `15min`. |
 | Same irradiance for ML and DAO solar predictions | Both predictors are fed the same measured/forecast irradiance, so their results can be compared. |
