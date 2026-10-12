@@ -31,7 +31,7 @@ The branch `dev` follows upstream `main` and carries everything listed below.
 
 | Fix | Purpose |
 | --- | --- |
-| Battery value at the end of the horizon | Averages the DC-to-AC efficiency over the power axis, not over table rows. |
+| Battery value at the end of the horizon | Averages the DC-to-AC efficiency over the power axis, not over table rows. The impact on prediction is basically none, but at least it has a physical basis, while averaging on bare table rows has none. |
 | Cancelled tasks | A cancelled task stays "cancelled" instead of being reported as an error. |
 | Database table reflection | Thread safe, so concurrent API calls no longer crash. |
 | 2026.10.0.rc1 issues | Calculation without predicted prices, price backfill range, debug capture, baseload in the prediction tail, day of the 00:00 run, old `/api/run` names, legacy UI under HA ingress, Reports V2 chart race, EV schedule length, DST night in the prognoses, null prediction settings, old CO2 setting name. |
