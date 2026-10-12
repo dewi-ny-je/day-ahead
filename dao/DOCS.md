@@ -228,8 +228,13 @@ Er zijn twee modellen:<br>
   * **harmonie**: voorspelt maximaal 40 uur vooruit en berekent data voor ieder grid van 1 x 1 km (fijnmazig)
   * **gfs**: voorspelt tot minimaal 96 uur vooruit en berekent data voor een grid van 10 x 10 km (grofmazig)<br>
   
-  Deze instelling is optioneel. Als je niets instelt wordt "harmonie" als model gekozen.<br>
-  De laatste is het best bruikbaar voor gebruikers die via een api een langere termijn voorspelling willen van hun pv-productie.
+  Deze instelling is optioneel. Als je niets instelt kiest DAO zelf:
+  * zonder prijsvoorspelling (`prediction.extension` is 0) wordt "harmonie" gebruikt;
+  * met prijsvoorspelling wordt "harmonie" gebruikt voor de eerste 40 uur en "gfs" voor de uren daarna,
+    zodat de verlengde horizon ook meteodata heeft.<br>
+
+  Een ingesteld model wordt altijd gebruikt. Kies je "harmonie", dan blijft de horizon beperkt tot 40 uur, ook met prijsvoorspelling.<br>
+  "gfs" is het best bruikbaar voor gebruikers die via een api een langere termijn voorspelling willen van hun pv-productie.
 * **ophaalpogingen**<br>
     Met de instelling "meteoserver-attempts" kun je het aantal maximaal aantal pogingen instellingen die DAO doet om meteodata binnen te krijgen.<br>
     Ook deze instelling is optioneel. Als je niets instelt worden er maximaal 2 ophaalpogingen per keer gedaan.
@@ -656,7 +661,7 @@ Het is allemaal optioneel.
 |                           | username                      | string           | day_ahead                          |                                                    |
 |                           | password                      | string           |                                    |                                                    |
 | **meteoserver-key**       |                               | string           |                                    |                                                    |
-| **meteoserver-model**     |                               | string           | harmonie                           | keuze uit harmonie of gfs                          |
+| **meteoserver-model**     |                               | string           | automatisch                        | keuze uit harmonie of gfs                          |
 | **meteoserver-attempts**  |                               | getal            | 2                                  | aantal ophaal pogingen                             |
 | **prices**                | source day ahead              | string           | nordpool                           | keuze uit: nordpool / entsoe / easyenergy / tibber |
 |                           | entsoe-api-key                | string           |                                    | alleen bij entsoe als source                       |

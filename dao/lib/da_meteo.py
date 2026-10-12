@@ -15,6 +15,9 @@ from sqlalchemy import select, func, and_
 
 # noinspection PyUnresolvedReferences
 class Meteo:
+    # harmonie voorspelt maximaal 40 uur vooruit
+    HARMONIE_HOURS = 40
+
     def __init__(
         self,
         config,
@@ -437,12 +440,46 @@ class Meteo:
         logging.info(f"Data {model}: \n{df1.to_string(index=True)}")
         return df1
 
+    def price_prediction_enabled(self) -> bool:
+        prices = getattr(self.config, "prices", None)
+        return prices is not None and prices.prediction.extension > 0
+
+    def get_forecast(self) -> tuple[pd.DataFrame, str]:
+        """
+        Haalt de verwachting op van meteoserver.
+        Een ingesteld model wordt altijd gebruikt. Zonder ingesteld model wordt
+        harmonie gebruikt; met prijsvoorspelling (langere horizon) wordt
+        harmonie gebruikt voor de eerste (max 40) uur en gfs voor de uren daarna.
+        :return: dataframe met de verwachting en een omschrijving van het model
+        """
+        if self.meteoserver_model is not None:
+            return (
+                self.get_from_meteoserver(self.meteoserver_model),
+                self.meteoserver_model,
+            )
+        if not self.price_prediction_enabled():
+            return self.get_from_meteoserver("harmonie"), "harmonie"
+        df_harmonie = self.get_from_meteoserver("harmonie")
+        df_gfs = self.get_from_meteoserver("gfs")
+        if len(df_harmonie) == 0:
+            return df_gfs, "gfs"
+        if len(df_gfs) == 0:
+            return df_harmonie, "harmonie"
+        end_harmonie = df_harmonie["tijd"].iloc[0] + self.HARMONIE_HOURS * 3600
+        df_harmonie = df_harmonie[df_harmonie["tijd"] < end_harmonie]
+        df_gfs = df_gfs[df_gfs["tijd"] > df_harmonie["tijd"].iloc[-1]]
+        logging.info(
+            f"Meteodata: {len(df_harmonie)} uur harmonie, "
+            f"daarna {len(df_gfs)} uur gfs"
+        )
+        return pd.concat([df_harmonie, df_gfs], ignore_index=True), "harmonie+gfs"
+
     def get_meteo_data(self, show_graph=False):
-        df1 = self.get_from_meteoserver(self.meteoserver_model)
+        df1, model = self.get_forecast()
         df_db = pd.DataFrame(columns=["time", "code", "value"])
         count = len(df1)
         if count == 0:
-            logging.error(f"No {self.meteoserver_model}-data recieved from meteoserver")
+            logging.error(f"No {model}-data recieved from meteoserver")
         else:
             df1 = df1.reset_index()  # make sure indexes pair with number of rows
             for row in df1.itertuples():
