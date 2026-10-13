@@ -62,8 +62,10 @@ class DaScheduler(DaBase):
                 elif key == key2:
                     tasks.append(self.scheduler_tasks[key])
             for task in tasks:
+                # de acties zijn de sleutels van de taken; de functienaam
+                # blijft werken voor taken waar die nog anders is
                 for key_task in self.tasks:
-                    if self.tasks[key_task]["function"] == task:
+                    if key_task == task or self.tasks[key_task]["function"] == task:
                         try:
                             self.run_task_process(key_task)
                         except KeyboardInterrupt:

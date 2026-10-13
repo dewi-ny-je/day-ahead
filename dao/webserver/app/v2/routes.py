@@ -203,6 +203,8 @@ def run_and_log(cmd, state):
     cancelled = False
 
     while proc.poll() is None:
+        time.sleep(1)
+
         updated_state = get_task_state()
 
         if updated_state.get("status") == "cancelled":
@@ -250,8 +252,6 @@ def run_and_log(cmd, state):
 
         if state["status"] == "running":
             save_task_state(state)
-
-        time.sleep(1)
 
     proc.wait()
 
@@ -383,7 +383,8 @@ def delete_file():
 
 @v2.route("/tasks")
 def tasks():
-    return render_template("v2/tasks.html")
+    from dao.prog.da_const import tasks
+    return render_template("v2/tasks.html", tasks=tasks)
 
 @v2.route("/task-cancel")
 def task_cancel():
@@ -391,53 +392,37 @@ def task_cancel():
         state = get_task_state()
         state["status"] = "cancelled"
         save_task_state(state)
-        return render_template("v2/tasks.html")
+        from dao.prog.da_const import tasks
+        return render_template("v2/tasks.html", tasks=tasks)
     except Exception:
         return "Error cancelling task", 500
 
 
 @v2.route("/task-exec", methods=["POST"])
 def task_exec():
+    from dao.prog.da_const import tasks
     current_state = get_task_state()
 
     if current_state["status"] == "running":
         return "Process already running: " + current_state["task"], 500
 
-    task = request.form.to_dict()["task"]
+    task_name = request.form.to_dict()["task"]
 
-    cmd = None
-    match task:
-        case "optimize_debug":
-            cmd = ["debug", "calc"]
-        case "optimize_regular":
-            cmd = ["calc"]
-        case "calc_baseloads":
-            cmd = ["calc_baseloads"]
-        case "update_tibber":
-            cmd = ["tibber"]
-        case "update_meteo":
-            cmd = ["meteo"]
-        case "update_prices":
-            cmd = ["prices"]
-        case "predicted_prices":
-            cmd = ["get_predicted_prices"]
-        case "train_ml":
-            cmd = ["train"]
-
-    if cmd is None:
-        return "Invalid action", 500
+    if task_name not in tasks.keys():
+        return "Invalid task", 500
 
     # Save the state synchronous to prevent race condition
     state = {
         "status": "running",
         "started": time.time(),
-        "task": task,
+        "task": task_name,
         "returncode": None,
         "logfile": None,
     }
     save_task_state(state)
 
-    cmd = ["python3", "../prog/day_ahead.py", *cmd]
+    cmd = tasks[task_name]["cmd"].copy()
+    cmd[1] ="../prog/day_ahead.py"
 
     threading.Thread(
         target=run_and_log,

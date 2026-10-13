@@ -465,18 +465,18 @@ class DaPrices:
             resp = get(api_url, timeout=60)
         except Exception as ex:
             logging.error(f"No data from {source} off predict prices: {ex}")
-            return
+            return False
         if resp.status_code != 200:
             logging.error(f"No data from {source} off predict prices, "
                           f"statuscode: {resp.status_code},"
                           f"message: {resp.text}")
-            return resp.status_code
+            return False
         logging.debug(resp.text)
         try:
             json_object = json.loads(resp.text)
         except ValueError as ex:
             logging.error(f"No valid json from {source} off predict prices: {ex}")
-            return
+            return False
         extract_data_f = "extract_data_"+source
         df_db = getattr(self, extract_data_f)(json_object, known_at, new_horizon)
         logging.info(
@@ -484,4 +484,4 @@ class DaPrices:
             f"{df_db.to_string(index=False)}"
         )
         self.db_da.savedata(df_db, tablename="prognoses")
-        return 0
+        return True

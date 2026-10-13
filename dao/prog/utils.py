@@ -136,7 +136,7 @@ def get_tibber_data():
             latest_ts = start_ts
         except Exception as ex:
             error_handling(ex)
-            return
+            return False
 
     # no starttime
     if (len(sys.argv) <= 2) or (start_ts is None):
@@ -177,7 +177,7 @@ def get_tibber_data():
     )
     if count < 24:
         logging.info("Er worden geen data opgehaald.")
-        return
+        return True
 
     query = (
         "{ "

@@ -52,9 +52,13 @@ def api_report(fld: str, periode: str):
 LEGACY_TASK_NAMES = {
     "calc_zonder_debug": "calc_optimum",
     "calc_met_debug": "calc_optimum_met_debug",
-    "get_tibber": "tibber",
-    "get_meteo": "meteo",
-    "get_prices": "prices",
+    "get_tibber": "get_tibber_data",
+    "get_meteo": "get_meteo_data",
+    "get_prices": "get_day_ahead_prices",
+    "tibber": "get_tibber_data",
+    "meteo": "get_meteo_data",
+    "prices": "get_day_ahead_prices",
+    "clean": "clean_data",
     "predicted_prices": "get_predicted_prices",
 }
 
@@ -85,7 +89,9 @@ def run_api(task: str):
         headers = {
             "Content-Type": "text/plain",
         }
-        return log_content, headers
+        # een mislukte taak ook als fout melden, met het log erbij
+        status = 200 if proc.returncode == 0 else 500
+        return log_content, status, headers
     else:
         return (
             "Onbekende bewerking: " + str(escape(task)),
