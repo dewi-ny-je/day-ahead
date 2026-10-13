@@ -53,6 +53,7 @@ LEGACY_TASK_NAMES = {
     "get_tibber": "tibber",
     "get_meteo": "meteo",
     "get_prices": "prices",
+    "predicted_prices": "get_predicted_prices",
 }
 
 

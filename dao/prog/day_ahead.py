@@ -4816,8 +4816,8 @@ def main():
             if arg.lower() == "prices":
                 da_calc.run_task_function("prices")
                 continue
-            if arg.lower() == "predicted_prices":
-                da_calc.run_task_function("predicted_prices")
+            if arg.lower() in ("get_predicted_prices", "predicted_prices"):
+                da_calc.run_task_function("get_predicted_prices")
                 continue
             if arg.lower() == "tibber":
                 da_calc.run_task_function("tibber")

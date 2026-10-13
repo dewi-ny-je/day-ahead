@@ -16,8 +16,13 @@ SchedulerAction = Literal[
     "clean_data",
     "calc_baseloads",
     "train_ml_predictions",
-    "predicted_prices"
+    "get_predicted_prices"
 ]
+
+# Oude actienamen die nog in bestaande instellingen staan
+LEGACY_SCHEDULER_ACTIONS = {
+    "predicted_prices": "get_predicted_prices",
+}
 
 
 class ScheduleEntry(BaseModel):
@@ -36,6 +41,11 @@ class ScheduleEntry(BaseModel):
             "x-help": "Task to run: data collection, optimization, or maintenance"
         },
     )
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def map_legacy_action(cls, v):
+        return LEGACY_SCHEDULER_ACTIONS.get(v, v)
 
     @field_validator("time")
     @classmethod
@@ -108,6 +118,7 @@ Define when automatic tasks run using time patterns.
 - **get_meteo_data**: Fetch weather forecasts (solar irradiation, temperature)
 - **get_tibber_data**: Fetch Tibber prices (if using Tibber)
 - **get_day_ahead_prices**: Fetch day-ahead market prices
+- **get_predicted_prices**: Fetch predicted prices beyond the day-ahead prices
 
 ### Optimization
 - **calc_optimum**: Run main optimization algorithm

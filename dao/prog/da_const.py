@@ -55,10 +55,10 @@ tasks = {
     #     "function": "consolidate_data",
     #     "file_name": "consolidate",
     # },
-    "predicted_prices": {
+    "get_predicted_prices": {
         "name": "Day ahead prijsvoorspelling ophalen",
-        "cmd": ["python3", "../prog/day_ahead.py", "predicted_prices"],
-        "function": "get_day_ahead_predicted_prices",
+        "cmd": ["python3", "../prog/day_ahead.py", "get_predicted_prices"],
+        "function": "get_predicted_prices",
         "file_name": "pred_prices",
     },
 }
