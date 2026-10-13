@@ -1787,7 +1787,20 @@ De perioden binnen een dag volgen de resolutie waarmee de optimalisering rekent
 Home Assistant bewaart zijn langetermijn-statistieken alleen per uur; bij een kwartier-interval
 worden de al gerealiseerde uurwaarden daarom gelijkmatig over de vier kwartieren van het uur
 verdeeld, zodat het totaal gelijk blijft. De prognoses komen wel met de volledige
-kwartier-resolutie terug zoals de optimalisering ze heeft berekend.
+kwartier-resolutie terug zoals de optimalisering ze heeft berekend.<br/>
+Met een kwartier-interval en een verlengde horizon (`prices.prediction.extension`) rekent de
+optimalisering in het deel met voorspelde prijzen per uur. In dat deel geeft de api dan ook
+uurwaarden terug. Elk record heeft daarom het attribuut **interval_minutes** (15 of 60) met de
+lengte van het interval.
+
+Bij de perioden binnen een dag geven de energievelden (consumption, production,
+netto_consumption, bat_in, bat_out, base, boil, wp, ev, pv_ac en pv_dc) het **gemiddelde
+vermogen in kW** over het interval terug en niet de energie in kWh. Zo zijn kwartier- en
+uurwaarden met elkaar te vergelijken. De energie van een interval is `value * interval_minutes / 60`.
+Bij een uur-interval is het getal gelijk aan de energie in kWh van dat uur.
+Bedragen (cost, profit, netto_cost) blijven bedragen per interval. Met **cumulate=1** krijg je
+de cumulatieve energie in kWh. De perioden van een week of langer geven energie (kWh) per dag
+of maand.
 
 Bij **pv_ac** en **pv_dc** wordt bij periode **vandaag_en_morgen** de voorspelling verlengd met een
 of twee dagen of tot zover stralingsgegevens bekend zijn.
@@ -1873,7 +1886,7 @@ rest:
     sensor:
       - name: DAO Grid consumption
         unique_id: dao_grid_consumption
-        unit_of_measurement: 'kWh'
+        unit_of_measurement: 'kW'
         value_template: "{{ (value_json.data[now().hour].value) | round(3) }}"
         json_attributes:
           - data
@@ -1893,7 +1906,7 @@ rest:
     sensor:
       - name: DAO Grid production
         unique_id: dao_grid_production
-        unit_of_measurement: 'kWh'
+        unit_of_measurement: 'kW'
         value_template: "{{ (value_json.data[now().hour].value) | round(3) }}"
         json_attributes:
           - data

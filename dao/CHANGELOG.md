@@ -17,6 +17,13 @@
   Because Home Assistant only keeps hourly long term statistics, already realised hourly values are
   spread evenly over the four quarters of the hour; the forecasts keep the full quarter-hourly
   resolution as calculated.
+- The api (`/api/report/<variable>/<period>`) now returns hourly records in the part of the horizon
+  with predicted prices, where the optimizer calculates per hour, instead of four quarters of which
+  three were 0. Every record of the periods within a day has a new attribute `interval_minutes`
+  (15 or 60). Energy fields (consumption, production, netto_consumption, bat_in, bat_out, base,
+  boil, wp, ev, pv_ac, pv_dc) are now returned as average power in kW per interval instead of
+  energy in kWh, so quarters and hours are comparable. With a `1hour` interval the numbers are
+  unchanged; amounts (cost, profit) and `cumulate=1` stay per interval resp. in kWh (corneel27/day-ahead#903).
 - The pv forecast that extends "vandaag_en_morgen" for `pv_ac`/`pv_dc` now follows the configured
   interval as well, instead of always being calculated hourly.
 - Fixed the timestamp of the last calculated SoC: it was always stored one hour after the last
