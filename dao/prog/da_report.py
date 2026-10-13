@@ -3513,6 +3513,79 @@ class Report(DaBase):
         df_result.index = df_result["time"]
         return df_result
 
+    def get_hourly_range(
+            self, vanaf: datetime.datetime, tot: datetime.datetime
+    ) -> tuple[datetime.datetime, datetime.datetime] | None:
+        """
+        Bepaalt in welk deel van de horizon de prognoses per uur zijn berekend.
+        Met een kwartier-interval en een verlengde horizon (prices.prediction.extension)
+        rekent de optimalisering in het deel met voorspelde prijzen per uur.
+        Dat deel herkennen we aan de prognoses zelf: de laatste reeks
+        prognoses die precies een uur uit elkaar liggen.
+        :param vanaf: begin van de gevraagde periode
+        :param tot: einde van de gevraagde periode
+        :return: (begin, einde) van het uur-deel of None als er geen uur-deel is
+        """
+        if self.interval != "15min":
+            return None
+        now = datetime.datetime.now()
+        start = max(vanaf, datetime.datetime(now.year, now.month, now.day, now.hour))
+        if start >= tot:
+            return None
+        df = self.db_da.get_column_data("prognoses", "cons", start=start, end=tot)
+        if df is None or len(df) < 2:
+            return None
+        moments = [int(ts) for ts in df["utc"]]
+        first = len(moments) - 1
+        while first > 0 and moments[first] - moments[first - 1] == 3600:
+            first -= 1
+        if first == len(moments) - 1:
+            # de laatste prognoses liggen een kwartier uit elkaar
+            return None
+        return (
+            datetime.datetime.fromtimestamp(moments[first]),
+            datetime.datetime.fromtimestamp(moments[-1] + 3600),
+        )
+
+    @staticmethod
+    def to_api_intervals(
+            df: pd.DataFrame,
+            value_columns: list,
+            interval: str,
+            hourly_range: tuple[datetime.datetime, datetime.datetime] | None = None,
+    ) -> pd.DataFrame:
+        """
+        Zet de data van de api om naar de intervallen waarmee is gerekend:
+        binnen hourly_range (het deel met voorspelde prijzen) worden de
+        kwartieren per uur samengevoegd; daarna (bijv. de verlengde pv-prognose)
+        blijft de resolutie van het interval. Er komt een kolom "interval_minutes" bij
+        met de lengte van elk interval.
+        :param df: dataframe met een kolom "time" (begintijdstip) en "datasoort"
+        :param value_columns: de kolommen met hoeveelheden (worden opgeteld)
+        :param interval: "kwartier" of "uur"
+        :param hourly_range: als != None (begin, einde) van het uur-deel
+        :return: dataframe gesorteerd op tijd
+        """
+        df = df.copy()
+        df["time"] = pd.to_datetime(df["time"])
+        minutes = int(interval_delta(interval).total_seconds() // 60)
+        df["interval_minutes"] = minutes
+        if hourly_range is not None and minutes < 60:
+            hourly_start, hourly_end = hourly_range
+            mask = (df["time"] >= hourly_start) & (df["time"] < hourly_end)
+            if mask.any():
+                hourly = df[mask].copy()
+                hourly["time"] = hourly["time"].dt.floor("h")
+                agg = {col: "sum" for col in value_columns}
+                agg["datasoort"] = lambda x: (
+                    "expected" if (x == "expected").any() else "recorded"
+                )
+                hourly = hourly.groupby("time", as_index=False).agg(agg)
+                hourly["interval_minutes"] = 60
+                df = pd.concat([df[~mask], hourly], ignore_index=True)
+        df = df.sort_values("time").reset_index(drop=True)
+        return df
+
     def get_api_data(self, field: str, _periode: str, cumulate: bool = False):
         periode = _periode.replace("_", " ")
         if periode not in self.periodes.keys():
@@ -3527,16 +3600,26 @@ class Report(DaBase):
             "profit",
             "netto_cost",
         ]
+        # de grid-velden die een energie zijn (de overige zijn bedragen)
+        grid_energy_fields = ["consumption", "production", "netto_consumption"]
         tot = self.periodes[periode]["tot"]
         # De api rapporteert met de resolutie waarmee de optimalisering rekent:
-        # per kwartier als het interval "15min" is, anders per uur.
+        # per kwartier als het interval "15min" is, anders per uur; in het deel
+        # met voorspelde prijzen rekent de optimalisering per uur en dan
+        # rapporteert de api ook per uur.
         # Bij de langere perioden (dag/maand) blijft de aggregatie ongewijzigd.
         interval = (
             self.report_interval
             if self.periodes[periode]["interval"] in INTRADAY_INTERVALS
             else None
         )
+        hourly_range = None
+        if interval == "kwartier":
+            hourly_range = self.get_hourly_range(self.periodes[periode]["vanaf"], tot)
         df = pd.DataFrame()
+        # kolommen met hoeveelheden per interval, en welke daarvan een energie zijn
+        value_columns = []
+        energy_columns = []
         if field in ["grid"] + grid_fields:  # grid data
             df_grid = self.get_grid_data(periode, _tot=tot, _interval=interval)
             df_grid["time"] = df_grid["vanaf"].apply(
@@ -3545,14 +3628,14 @@ class Report(DaBase):
 
             if field in grid_fields:
                 df = df_grid[["time", field, "datasoort"]].copy()
-                if cumulate:
-                    df[field] = df_grid[field].cumsum()
                 df.rename({field: "value"}, axis=1, inplace=True)
+                value_columns = ["value"]
+                if field in grid_energy_fields:
+                    energy_columns = ["value"]
             if field == "grid":
                 df = df_grid[["time", "datasoort"] + grid_fields].copy()
-                if cumulate:
-                    for field in grid_fields:
-                        df[field] = df[field].cumsum()
+                value_columns = grid_fields
+                energy_columns = grid_energy_fields
         elif field == "da":
             df = self.get_price_data(
                 self.periodes[periode]["vanaf"],
@@ -3578,23 +3661,37 @@ class Report(DaBase):
                 tot = last_moment + datetime.timedelta(days=2)
                 df_pv = self.get_pv_prognose(field, vanaf, tot)
                 if len(df_pv) > 0:
-                    df = pd.concat([df, df_pv])
-            if cumulate:
-                df[field] = df[field].cumsum()
+                    df = pd.concat([df, df_pv[["time", field, "datasoort"]]])
             df.rename({field: "value"}, axis=1, inplace=True)
+            value_columns = ["value"]
+            energy_columns = ["value"]
         else:
             result = (
                 f'{{"message":"Failed", "reason": "field: \'{field}\' is not allowed"}}'
             )
             return result
 
+        if interval is not None and len(value_columns) > 0:
+            df = self.to_api_intervals(df, value_columns, interval, hourly_range)
+            if not cumulate:
+                # gemiddeld vermogen (kW) per interval in plaats van energie (kWh),
+                # zodat kwartieren en uren met elkaar te vergelijken zijn
+                for col in energy_columns:
+                    df[col] = df[col] / (df["interval_minutes"] / 60)
+        if cumulate:
+            for col in value_columns:
+                df[col] = df[col].cumsum()
+
         df["time"] = pd.to_datetime(df["time"])
         df["time_ts"] = df["time"].dt.tz_localize(self.time_zone)
         df["time"] = df["time"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M"))
         df.rename(columns={"datasoort": "datatype"}, inplace=True)
         cols = df.columns.tolist()
-        cols = cols[-1:] + cols[:-1]
-        df = df[cols]
+        cols.remove("time_ts")
+        if "interval_minutes" in cols:
+            cols.remove("interval_minutes")
+            cols.append("interval_minutes")
+        df = df[["time_ts"] + cols]
         data_json = df.to_json(orient="records")
         result = '{ "message":"Success", "data": ' + data_json + " }"
         return result
