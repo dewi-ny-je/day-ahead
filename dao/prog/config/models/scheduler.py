@@ -45,7 +45,9 @@ class ScheduleEntry(BaseModel):
     @field_validator("action", mode="before")
     @classmethod
     def map_legacy_action(cls, v):
-        return LEGACY_SCHEDULER_ACTIONS.get(v, v)
+        if isinstance(v, str):
+            return LEGACY_SCHEDULER_ACTIONS.get(v, v)
+        return v
 
     @field_validator("time")
     @classmethod
