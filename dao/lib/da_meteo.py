@@ -437,12 +437,71 @@ class Meteo:
         logging.info(f"Data {model}: \n{df1.to_string(index=True)}")
         return df1
 
+    def price_prediction_enabled(self) -> bool:
+        prices = getattr(self.config, "prices", None)
+        return prices is not None and prices.prediction.extension > 0
+
+    def try_get_from_meteoserver(self, model: str) -> pd.DataFrame:
+        # een fout bij het ene model mag de data van het andere niet kosten
+        try:
+            return self.get_from_meteoserver(model)
+        except Exception as ex:
+            logging.error(f"Fout bij ophalen {model}-data van meteoserver: {ex}")
+            return pd.DataFrame()
+
+    def planning_end(self) -> float:
+        """
+        :return: utc timestamp van het einde van de planningshorizon: het einde
+        van de bekende day-ahead prijzen plus de verlenging met voorspelde prijzen
+        """
+        extension = self.config.prices.prediction.extension
+        known_at = self.db_da.get_time_border_record("da")
+        if known_at is None:
+            start = datetime.datetime.now().timestamp()
+        else:
+            # het laatste record is het begin van het laatste uur
+            start = known_at.timestamp() + 3600
+        return start + extension * 3600
+
+    def get_forecast(self) -> tuple[pd.DataFrame, str]:
+        """
+        Haalt de verwachting op van meteoserver.
+        Een ingesteld model wordt altijd gebruikt. Zonder ingesteld model wordt
+        harmonie gebruikt. Alleen als met prijsvoorspelling de planningshorizon
+        verder reikt dan harmonie (max 40 uur) wordt ook gfs opgehaald, voor de
+        uren na harmonie.
+        :return: dataframe met de verwachting en een omschrijving van het model
+        """
+        if self.meteoserver_model is not None:
+            return (
+                self.get_from_meteoserver(self.meteoserver_model),
+                self.meteoserver_model,
+            )
+        if not self.price_prediction_enabled():
+            return self.get_from_meteoserver("harmonie"), "harmonie"
+        df_harmonie = self.try_get_from_meteoserver("harmonie")
+        if len(df_harmonie) > 0:
+            end_harmonie = df_harmonie["tijd"].iloc[-1] + 3600
+            if end_harmonie >= self.planning_end():
+                return df_harmonie, "harmonie"
+        df_gfs = self.try_get_from_meteoserver("gfs")
+        if len(df_harmonie) == 0:
+            return df_gfs, "gfs"
+        if len(df_gfs) == 0:
+            return df_harmonie, "harmonie"
+        df_gfs = df_gfs[df_gfs["tijd"] > df_harmonie["tijd"].iloc[-1]]
+        logging.info(
+            f"Meteodata: {len(df_harmonie)} uur harmonie, "
+            f"daarna {len(df_gfs)} uur gfs"
+        )
+        return pd.concat([df_harmonie, df_gfs], ignore_index=True), "harmonie+gfs"
+
     def get_meteo_data(self, show_graph=False):
-        df1 = self.get_from_meteoserver(self.meteoserver_model)
+        df1, model = self.get_forecast()
         df_db = pd.DataFrame(columns=["time", "code", "value"])
         count = len(df1)
         if count == 0:
-            logging.error(f"No {self.meteoserver_model}-data recieved from meteoserver")
+            logging.error(f"No {model}-data recieved from meteoserver")
         else:
             df1 = df1.reset_index()  # make sure indexes pair with number of rows
             for row in df1.itertuples():

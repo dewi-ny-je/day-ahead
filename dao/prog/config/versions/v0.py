@@ -81,11 +81,15 @@ class ConfigurationV0(DAOConfigBaseModel):
             "x-validation-hint": "Use !secret for API keys",
         },
     )
-    meteoserver_model: Literal["harmonie", "gfs"] = Field(
-        default="harmonie",
+    meteoserver_model: Optional[Literal["harmonie", "gfs"]] = Field(
+        default=None,
         alias="meteoserver-model",
-        description="Meteoserver model",
-        json_schema_extra={"x-ui-group": "DAO", "x-ui-section": "Weather"},
+        description="Meteoserver model (not set: chosen automatically)",
+        json_schema_extra={
+            "x-ui-group": "DAO",
+            "x-ui-section": "Weather",
+            "x-help": "Weather model to fetch from Meteoserver. 'harmonie' is fine-grained but forecasts at most 40 hours ahead; 'gfs' is coarser but forecasts at least 96 hours ahead. When not set, harmonie is used; only when the planning horizon (known day-ahead prices plus the price prediction extension) reaches beyond harmonie is gfs also fetched, for the hours after harmonie. Forcing 'harmonie' limits the planning horizon to its 40 hours, also with price prediction.",
+        },
     )
 
     meteoserver_attemps: Optional[int] = Field(

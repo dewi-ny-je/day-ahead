@@ -6,6 +6,11 @@
 - corrected finish day_ahead.py on arm64 to prevent crash with error -4
 
 # Unreleased
+- The meteo model is now chosen automatically when `meteoserver-model` is not set: harmonie, and
+  only when the planning horizon (known day-ahead prices plus `prediction.extension`) reaches
+  beyond harmonie's 40 hours is gfs also fetched, for the hours after harmonie, so the extended
+  horizon has weather data too. A configured model is always
+  used; with harmonie the horizon stays limited to its 40 hours.
 - The api (`/api/report/<variable>/<period>`) now returns the periods within a day ("vandaag",
   "morgen", "vandaag_en_morgen" and "gisteren") with the resolution the optimizer calculates with:
   quarter-hourly values when `interval` is `15min` instead of hourly values.
