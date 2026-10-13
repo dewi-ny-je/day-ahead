@@ -6,6 +6,11 @@
 - corrected finish day_ahead.py on arm64 to prevent crash with error -4
 
 # Unreleased
+- The Docker image is about 1.4 GB smaller: the unused debug build and duplicate libraries of CBC are
+  removed, xgboost is replaced by xgboost-cpu (no NVIDIA GPU library), the unused MySQL drivers
+  `mysql`, `mysql-connector-python` and `mariadb` are dropped (pymysql is the one in use), and
+  compilers, npm and development headers are no longer installed in the image.
+  With `use_self_compiled_miplib` the build tools are now installed on the first compile.
 - The meteo model is now chosen automatically when `meteoserver-model` is not set: harmonie, and
   only when the planning horizon (known day-ahead prices plus `prediction.extension`) reaches
   beyond harmonie's 40 hours is gfs also fetched, for the hours after harmonie, so the extended
