@@ -1,14 +1,16 @@
-import pandas as pd
-from dao.lib.db_manager import DBmanagerObj
-from entsoe import EntsoePandasClient
 import datetime
-from requests import get, post
-from nordpool.elspot import Prices as NordpoolPrices
-import pytz
 import json
+import logging
 import math
 import pprint as pp
-import logging
+
+import pandas as pd
+import pytz
+from entsoe import EntsoePandasClient
+from nordpool.elspot import Prices as NordpoolPrices
+from requests import get, post
+
+from dao.lib.db_manager import DBmanagerObj
 
 
 class DaPrices:
@@ -64,13 +66,13 @@ class DaPrices:
             end = tz.normalize(tz.localize(end))
 
         present = self.db_da.get_time_border_record("da")
-        if not (present is None) and _start is None:
+        if present is not None and _start is None:
             present = tz.normalize(tz.localize(present))
             present = present + datetime.timedelta(minutes=resolution)
             start = max(present, start)
 
             if present >= (end - datetime.timedelta(hours=1)):
-                logging.info(f"Spot prices already present")
+                logging.info("Spot prices already present")
                 return
 
         logging.debug(f"Day ahead tarieven ophalen voor {start} tot {end}")

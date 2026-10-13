@@ -1,44 +1,41 @@
+import base64
 import bisect
 import calendar
 import datetime
+import itertools
+import json
+import logging
+import math
+from io import BytesIO
+
+import matplotlib.pyplot as plt
 
 # from unittest.mock import inplace
-
 import pandas as pd
-import base64
-from io import BytesIO
 from dateutil.relativedelta import relativedelta
 from pandas.core.dtypes.inference import is_number
+from sklearn.metrics import r2_score
+from sqlalchemy import (
+    BigInteger,
+    String,
+    and_,
+    case,
+    column,
+    func,
+    literal,
+    select,
+    union,
+    values,
+)
 
 from dao.lib.da_graph import GraphBuilder
 from dao.prog.da_base import DaBase
-from dao.prog.utils import get_value_from_dict
 from dao.prog.production_bonus import (
     AnnualCapUsage,
     interval_durations,
     split_quarters,
 )
-import math
-import json
-import itertools
-import logging
-from sqlalchemy import (
-    select,
-    func,
-    literal,
-    and_,
-    case,
-    true,
-    bindparam,
-    union_all,
-    String,
-    values,
-    column,
-    BigInteger,
-    union,
-)
-import matplotlib.pyplot as plt
-
+from dao.prog.utils import get_value_from_dict
 
 # Rapportage-intervallen die een deel van een dag beschrijven.
 # "kwartier" wordt gebruikt als de optimalisering met een resolutie van 15 minuten draait.
@@ -64,7 +61,6 @@ def calc_r2(serie_x: pd.Series, serie_y: pd.Series) -> float:
     if serie_x.count() < 24 or serie_y.count() < 24:
         return pd.NA
     # imported here to speed up the runs which don't need it
-    from sklearn.metrics import r2_score
 
     return r2_score(serie_x, serie_y)
 
@@ -692,7 +688,7 @@ class Report(DaBase):
             for key in self.co2_graph_options["graphs"][graph_num]["series_keys"]:
                 serie = self.co2_dict[key]
                 serie["column"] = key
-                if not ("type" in serie):
+                if "type" not in serie:
                     serie["type"] = "stacked"
                 serie["title"] = serie["name"]
                 self.co2_graph_options["graphs"][graph_num]["series"].append(serie)
@@ -1574,7 +1570,7 @@ class Report(DaBase):
 
         if interval != "uur":
             agg_dict = {"vanaf": "min"}
-            for key, categorie in self.energy_balance_dict.items():
+            for key, _categorie in self.energy_balance_dict.items():
                 agg_dict[key] = "sum"
             result = result.groupby([interval], as_index=False).agg(agg_dict)
 
@@ -2418,8 +2414,8 @@ class Report(DaBase):
         """
         df_result = pd.DataFrame(columns=[rep_interval] + rep_columns)
         df_result[rep_interval] = df_input[rep_interval]
-        for column in rep_columns:
-            df_result[column] = df_input[column]
+        for report_column in rep_columns:
+            df_result[report_column] = df_input[report_column]
             # df_result[rep_columns] = df_input[rep_columns]
         df_result = self.agg_interval(calc_dict, df_result, rep_interval)
         if active_view == "tabel":
@@ -3080,7 +3076,7 @@ class Report(DaBase):
         period = self.periodes[periode]
         if dict is None:
             dict = self.energy_balance_dict
-        if not (field in dict):
+        if field not in dict:
             result = None
             return result
         categorie = dict[field]
@@ -3824,10 +3820,8 @@ class Report(DaBase):
                 sensors_cte.c.code.label("code"),
                 sensors_cte.c.sensor.label("sensor"),
                 (
-                        (
-                                func.max(filtered_statistics.c.sum)
-                                - func.min(filtered_statistics.c.sum)
-                        )
+                    func.max(filtered_statistics.c.sum)
+                    - func.min(filtered_statistics.c.sum)
                 ).label("sensor_value"),
             )
             .select_from(

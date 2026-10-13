@@ -2,10 +2,12 @@
 Pricing configuration models.
 """
 
-from typing import Optional, Literal
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from .base import SecretStr
 from datetime import date, datetime
+from typing import Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from .base import SecretStr
 
 
 class ProductionBonusConfig(BaseModel):
@@ -179,7 +181,7 @@ class PricingConfig(BaseModel):
             "x-ui-section": "Prices",
         },
     )
-    entsoe_api_key: Optional[SecretStr] = Field(
+    entsoe_api_key: SecretStr | None = Field(
         default=None,
         alias="entsoe-api-key",
         description="ENTSO-E API key (can use !secret)",
@@ -262,7 +264,7 @@ class PricingConfig(BaseModel):
             "x-validation-hint": "Dict with YYYY-MM-DD keys, integer 0-100 values",
         },
     )
-    multiplier_consumption: Optional[dict[str, float]] = Field(
+    multiplier_consumption: dict[str, float] | None = Field(
         default={"2000-01-01": 1.0},
         alias="multiplier consumption",
         description="Multiplier for consumption by date (YYYY-MM-DD -> x.xx)",
@@ -273,7 +275,7 @@ class PricingConfig(BaseModel):
             "x-validation-hint": "Dict with YYYY-MM-DD keys, float -100.0 - +100.0 values",
         },
     )
-    multiplier_production: Optional[dict[str, float]] = Field(
+    multiplier_production: dict[str, float] | None = Field(
         default={"2000-01-01": 1.0},
         alias="multiplier production",
         description="Multiplier for production by date (YYYY-MM-DD -> x.xx)",
@@ -321,10 +323,10 @@ class PricingConfig(BaseModel):
     @classmethod
     def validate_vat_percentages(cls, v: dict[str, float]) -> dict[str, float]:
         """Validate VAT percentages are between 0 and 100."""
-        for date, percentage in v.items():
+        for date_key, percentage in v.items():
             if not (0 <= percentage <= 100):
                 raise ValueError(
-                    f"VAT percentage must be between 0 and 100, got {percentage} for date {date}"
+                    f"VAT percentage must be between 0 and 100, got {percentage} for date {date_key}"
                 )
         return v
 

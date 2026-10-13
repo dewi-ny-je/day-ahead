@@ -2,14 +2,16 @@
 Configuration loader with support for versioning, migration, and unknown key preservation.
 """
 
-import shutil
+import fcntl
 import json
 import logging
+import shutil
 import threading
 from pathlib import Path
-from typing import Any, Optional, Type
+from typing import Any
+
 from pydantic import BaseModel, ValidationError
-import fcntl
+
 from .migrations.migrator import migrate_config
 from .versions.v0 import ConfigurationV0
 
@@ -32,7 +34,7 @@ class ConfigValidationError(ValueError):
 
 
 # Version models registry: maps version number -> Pydantic model class
-VERSION_MODELS: dict[int, Type[BaseModel]] = {
+VERSION_MODELS: dict[int, type[BaseModel]] = {
     0: ConfigurationV0,
     1: ConfigurationV1,
     # Uncomment when creating v2:
@@ -54,7 +56,7 @@ class ConfigurationLoader:
     - Backup creation before migration
     """
 
-    def __init__(self, config_path: Path, secrets_path: Optional[Path] = None):
+    def __init__(self, config_path: Path, secrets_path: Path | None = None):
         """
         Initialize the configuration loader.
 
@@ -64,8 +66,8 @@ class ConfigurationLoader:
         """
         self.config_path = config_path
         self.secrets_path = secrets_path or config_path.parent / "secrets.json"
-        self._raw_options: Optional[dict[str, Any]] = None
-        self._secrets: Optional[dict[str, str]] = None
+        self._raw_options: dict[str, Any] | None = None
+        self._secrets: dict[str, str] | None = None
 
     def _load_secrets(self) -> dict[str, str]:
         """
@@ -82,7 +84,7 @@ class ConfigurationLoader:
             self._secrets = {}
             return self._secrets
 
-        with open(self.secrets_path, "r", encoding="utf-8") as f:
+        with open(self.secrets_path, encoding="utf-8") as f:
             self._secrets = json.load(f)
 
         logger.info(f"Loaded {len(self._secrets)} secrets from {self.secrets_path}")
@@ -217,7 +219,7 @@ class ConfigurationLoader:
             raise ConfigValidationError(e) from e
 
     def save(
-        self, config_data: dict[str, Any], save_path: Optional[Path] = None
+        self, config_data: dict[str, Any], save_path: Path | None = None
     ) -> None:
         """
         Save configuration to disk, preserving unknown keys.
@@ -253,7 +255,7 @@ class ConfigurationLoader:
         return self._secrets
 
 
-def file_stamp(path: Path) -> Optional[tuple[int, int]]:
+def file_stamp(path: Path) -> tuple[int, int] | None:
     """
     Returns a change-stamp of a file: (modification time in ns, size in bytes).
 
@@ -286,10 +288,10 @@ class ConfigCache:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._config: Optional[BaseModel] = None
-        self._loader: Optional[ConfigurationLoader] = None
-        self._path: Optional[Path] = None
-        self._stamp: Optional[tuple] = None
+        self._config: BaseModel | None = None
+        self._loader: ConfigurationLoader | None = None
+        self._path: Path | None = None
+        self._stamp: tuple | None = None
 
     @staticmethod
     def _stamp_of(loader: "ConfigurationLoader") -> tuple:

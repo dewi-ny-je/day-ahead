@@ -1,26 +1,28 @@
 
 import collections
 import datetime
-import re
-import time
-
-# from sqlalchemy.sql.coercions import expect_col_expression_collection
-
-from flask import Blueprint, render_template, request, jsonify, session as flask_session, url_for
-from markupsafe import escape
 import fnmatch
-import os
-import threading
-from subprocess import Popen, PIPE, run, STDOUT
+import json
 import logging
+import os
+import re
+import threading
+import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-from dao.prog.config.loader import config_cache
-from dao.prog.da_report import Report
+from subprocess import PIPE, STDOUT, Popen
+
+# from sqlalchemy.sql.coercions import expect_col_expression_collection
+from flask import Blueprint, jsonify, render_template, request, url_for
+from flask import session as flask_session
+
 from dao.prog import da_calc_graph
-from dao.prog.version import __version__
-import json
+from dao.prog.config.loader import config_cache
+
+# from sqlalchemy.sql.coercions import expect_col_expression_collection
 from dao.prog.da_const import tasks as bewerkingen
+from dao.prog.da_report import Report
+from dao.prog.version import __version__
 
 app = Blueprint("app", __name__)
 
@@ -180,7 +182,7 @@ def generate_solar_items():
         if "solar" in web_menu.keys():
             del web_menu["solar"]
     else:
-        if not "solar" in web_menu.keys():
+        if "solar" not in web_menu.keys():
             web_menu.update(solar_web_menu)
             key_order = ("home", "run", "reports", "savings", "solar", "settings")
             web_menu = collections.OrderedDict((k, web_menu[k]) for k in key_order)
@@ -220,7 +222,7 @@ handler.setLevel(logging.INFO)
 logging.basicConfig(
     level=logging.DEBUG,
     handlers=[handler],
-    format=f"%(asctime)s %(levelname)s %(name)s %(threadName)s : %(message)s",
+    format="%(asctime)s %(levelname)s %(name)s %(threadName)s : %(message)s",
 )
 
 if config is not None:
@@ -315,7 +317,7 @@ def menu():
 def home():
     subjects = ["balans"]
     views = ["grafiek", "tabel"]
-    cur_subject = "grid"
+    _cur_subject = "grid"
     active_subject = "grid"
     cur_view = "grafiek"
     # global active_view
@@ -337,7 +339,7 @@ def home():
         # print('Home:', lst)
         if "cur_subject" in lst:
             #   active_subject = lst["cur_subject"][0]
-            cur_subject = lst["cur_subject"][0]
+            _cur_subject = lst["cur_subject"][0]
         if "cur_view" in lst:
             #   active_view = lst["cur_view"][0]
             cur_view = lst["cur_view"][0]
@@ -399,7 +401,7 @@ def home():
         index = len(flist) - 1
 
     if action in ["fast_forward", "fast_reverse"]:
-        if type(active_time) != float:
+        if type(active_time) is not float:
             active_time = float(active_time)
         if action == "fast_forward":
             target_time = active_time - (6 * 3600)  # Add 6 hours
@@ -432,7 +434,7 @@ def home():
             tabel = None
         else:
             image = None
-            with open(app_datapath + active_map + flist[index]["name"], "r") as f:
+            with open(app_datapath + active_map + flist[index]["name"]) as f:
                 tabel = f.read()
     else:
         active_time = None
@@ -637,7 +639,7 @@ def show_log():
     logfile = task_state.get("logfile", None)
     if logfile is None or not os.path.exists(logfile):
         return "Nog geen log beschikbaar"
-    with open(logfile, "r") as f:
+    with open(logfile) as f:
         lines = f.readlines()
     state = task_state["status"]
     if state == "running":
@@ -678,7 +680,7 @@ def reports(active_menu: str):
             active_view = lst["view"][0]
         if "periode-select" in lst:
             active_period = lst["periode-select"][0]
-        if not (active_period in period_lst):
+        if active_period not in period_lst:
             active_period = period_lst[0]
         if "met_prognose" in lst:
             met_prognose = lst["met_prognose"][0]
@@ -849,7 +851,7 @@ def solar():
 @app.route("/settings/<filename>", methods=["POST", "GET"])
 def settings():
     def get_file(fname):
-        with open(fname, "r") as file:
+        with open(fname) as file:
             return file.read()
 
     settngs = ["options", "secrets"]

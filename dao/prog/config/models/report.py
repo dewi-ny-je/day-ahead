@@ -2,8 +2,8 @@
 Reporting configuration models.
 """
 
-from typing import Optional
-from pydantic import AliasChoices, BaseModel, Field, ConfigDict
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+
 from .base import EntityId
 
 
@@ -120,7 +120,7 @@ class ReportConfig(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    co2_intensity_sensor: Optional[list[EntityId]] | Optional[EntityId] = Field(
+    co2_intensity_sensor: list[EntityId] | None | EntityId | None = Field(
         default=[],
         alias="entity co2-intensity",
         # "co2 intensity sensor" is de naam uit eerdere versies
@@ -133,7 +133,7 @@ class ReportConfig(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    sensors: Optional[dict] = Field(
+    sensors: dict | None = Field(
         default=None,
         description="Additional sensors configuration",
         json_schema_extra={

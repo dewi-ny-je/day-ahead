@@ -3,8 +3,10 @@ Tests for configuration loader.
 """
 
 import json
-import pytest
 from pathlib import Path
+
+import pytest
+
 from dao.prog.config.loader import (
     CURRENT_VERSION,
     ConfigurationLoader,
