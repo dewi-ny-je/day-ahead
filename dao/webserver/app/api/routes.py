@@ -52,9 +52,13 @@ def api_report(fld: str, periode: str):
 LEGACY_TASK_NAMES = {
     "calc_zonder_debug": "calc_optimum",
     "calc_met_debug": "calc_optimum_met_debug",
-    "get_tibber": "tibber",
-    "get_meteo": "meteo",
-    "get_prices": "prices",
+    "get_tibber": "get_tibber_data",
+    "get_meteo": "get_meteo_data",
+    "get_prices": "get_day_ahead_prices",
+    "tibber": "get_tibber_data",
+    "meteo": "get_meteo_data",
+    "prices": "get_day_ahead_prices",
+    "clean": "clean_data",
     "predicted_prices": "get_predicted_prices",
 }
 
