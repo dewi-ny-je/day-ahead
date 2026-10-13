@@ -177,7 +177,7 @@ def get_tibber_data():
     )
     if count < 24:
         logging.info("Er worden geen data opgehaald.")
-        return False
+        return True
 
     query = (
         "{ "

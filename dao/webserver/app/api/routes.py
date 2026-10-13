@@ -89,7 +89,9 @@ def run_api(task: str):
         headers = {
             "Content-Type": "text/plain",
         }
-        return log_content, headers
+        # een mislukte taak ook als fout melden, met het log erbij
+        status = 200 if proc.returncode == 0 else 500
+        return log_content, status, headers
     else:
         return (
             "Onbekende bewerking: " + str(escape(task)),

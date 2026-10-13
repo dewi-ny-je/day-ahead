@@ -360,7 +360,7 @@ class DaBase(hass.Hass):
         self.prices.get_prices(source, start, end)
 
     def get_predicted_prices(self):
-        self.prices.get_predicted_prices()
+        return self.prices.get_predicted_prices()
 
     def save_df(self, tablename: str, tijd: list, df: pd.DataFrame):
         """
@@ -565,7 +565,7 @@ class DaBase(hass.Hass):
 
         dacalc = DaCalc(self.file_name)
         dacalc.debug = False
-        dacalc.calc_optimum()
+        return dacalc.calc_optimum()
 
     @staticmethod
     def calc_baseloads():

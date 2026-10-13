@@ -4791,6 +4791,19 @@ def main():
     if da_calc.config is None:
         return
 
+    # argument op de commandoregel -> taak
+    arg_tasks = {
+        "meteo": "get_meteo_data",
+        "prices": "get_day_ahead_prices",
+        "get_predicted_prices": "get_predicted_prices",
+        "predicted_prices": "get_predicted_prices",
+        "tibber": "get_tibber_data",
+        "clean": "clean_data",
+        "clean_data": "clean_data",
+        "consolidate": "consolidate",
+        "calc_baseloads": "calc_baseloads",
+        "train": "train_ml_predictions",
+    }
     exit_code = 0
     if len(sys.argv) > 1:
         args = sys.argv[1:]
@@ -4800,39 +4813,18 @@ def main():
                 continue
             if arg.lower() == "calc":
                 if da_calc.debug:
-                    exit_code = da_calc.run_task_function("calc_optimum_met_debug")
+                    task = "calc_optimum_met_debug"
                 else:
-                    exit_code = da_calc.run_task_function("calc_optimum")
+                    task = "calc_optimum"
+            elif arg.lower() in arg_tasks:
+                task = arg_tasks[arg.lower()]
+            else:
                 continue
-            if arg.lower() == "meteo":
-                exit_code = da_calc.run_task_function("get_meteo_data")
-                continue
-            if arg.lower() == "prices":
-                exit_code = da_calc.run_task_function("get_day_ahead_prices")
-                continue
-            if arg.lower() in ("get_predicted_prices", "predicted_prices"):
-                exit_code = da_calc.run_task_function("get_predicted_prices")
-                continue
-            if arg.lower() == "tibber":
-                exit_code = da_calc.run_task_function("get_tibber_data")
-                continue
-            if arg.lower() in ("clean", "clean_data"):
-                exit_code = da_calc.run_task_function("clean_data")
-                continue
-            if arg.lower() == "consolidate":
-                exit_code = da_calc.run_task_function("consolidate")
-                continue
-            if arg.lower() == "calc_baseloads":
-                exit_code = da_calc.run_task_function("calc_baseloads")
-                continue
-            if arg.lower() == "train":
-                exit_code = da_calc.run_task_function("train_ml_predictions")
-                continue
-
+            exit_code = da_calc.run_task_function(task)
             if exit_code is False:
                 exit_code = 1
-
-            if exit_code > 0:
+            # stop bij de eerste mislukte taak, zodat die fout de exitcode blijft
+            if exit_code:
                 break
 
     da_calc.db_da.log_pool_status()
