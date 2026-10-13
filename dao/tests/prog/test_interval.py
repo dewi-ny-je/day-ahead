@@ -132,8 +132,8 @@ def test_to_api_intervals_voegt_kwartieren_samen_in_uurdeel():
     df = pd.DataFrame(
         {"time": tijden, "value": waarden, "datasoort": ["expected"] * 12}
     )
-    hourly_start = datetime.datetime(2025, 4, 6, 23)
-    result = Report.to_api_intervals(df, ["value"], "kwartier", hourly_start)
+    hourly_range = (datetime.datetime(2025, 4, 6, 23), datetime.datetime(2025, 4, 7, 1))
+    result = Report.to_api_intervals(df, ["value"], "kwartier", hourly_range)
     assert len(result) == 6
     assert list(result["interval_minutes"]) == [15] * 4 + [60] * 2
     assert list(result["value"]) == [0.25] * 4 + [1.0, 2.0]
@@ -181,7 +181,10 @@ def test_get_hourly_start_vindt_uurdeel():
     uren = [kwartieren[-1] + datetime.timedelta(minutes=15, hours=i) for i in range(5)]
     report = _report_met_prognoses(kwartieren + uren)
     tot = begin + datetime.timedelta(days=2)
-    assert report.get_hourly_start(begin, tot) == uren[0]
+    assert report.get_hourly_range(begin, tot) == (
+        uren[0],
+        uren[-1] + datetime.timedelta(hours=1),
+    )
 
 
 def test_get_hourly_start_zonder_uurdeel():
@@ -189,13 +192,13 @@ def test_get_hourly_start_zonder_uurdeel():
     begin = datetime.datetime(now.year, now.month, now.day, now.hour)
     report = _report_met_prognoses(_kwartieren(begin, 20))
     tot = begin + datetime.timedelta(days=2)
-    assert report.get_hourly_start(begin, tot) is None
+    assert report.get_hourly_range(begin, tot) is None
     # met een uur-interval is er nooit een apart uurdeel
     uren = [begin + datetime.timedelta(hours=i) for i in range(5)]
-    assert _report_met_prognoses(uren, "1hour").get_hourly_start(begin, tot) is None
+    assert _report_met_prognoses(uren, "1hour").get_hourly_range(begin, tot) is None
 
 
-def _api_report(df_balance, hourly_start):
+def _api_report(df_balance, hourly_range):
     import json
 
     report = Report.__new__(Report)
@@ -212,7 +215,7 @@ def _api_report(df_balance, hourly_start):
             "interval": "uur",
         }
     }
-    report.get_hourly_start = lambda _vanaf, _tot: hourly_start
+    report.get_hourly_range = lambda _vanaf, _tot: hourly_range
     report.get_energy_balance_data = lambda *args, **kwargs: (df_balance, None)
     return report, json
 
@@ -223,7 +226,9 @@ def test_get_api_data_geeft_gemiddeld_vermogen():
     df_balance = pd.DataFrame(
         {"tijd": tijden, "base": waarden, "datasoort": ["expected"] * 12}
     )
-    report, json = _api_report(df_balance, datetime.datetime(2025, 4, 6, 23))
+    report, json = _api_report(
+        df_balance, (datetime.datetime(2025, 4, 6, 23), datetime.datetime(2025, 4, 7, 1))
+    )
 
     data = json.loads(report.get_api_data("base", "vandaag"))["data"]
     assert [r["time"] for r in data] == [
@@ -242,3 +247,16 @@ def test_get_api_data_geeft_gemiddeld_vermogen():
     # cumulatief blijft energie (kWh)
     cumul = json.loads(report.get_api_data("base", "vandaag", cumulate=True))["data"]
     assert [r["value"] for r in cumul] == [0.25, 0.5, 0.75, 1.0, 2.0, 4.0]
+
+
+def test_to_api_intervals_laat_staart_na_uurdeel_per_kwartier():
+    """Na het uur-deel (bijv. de verlengde pv-prognose) blijven kwartieren staan."""
+    tijden = _kwartieren(datetime.datetime(2025, 4, 6, 23), 8)
+    waarden = [1.0, 0, 0, 0] + [0.25] * 4
+    df = pd.DataFrame(
+        {"time": tijden, "value": waarden, "datasoort": ["expected"] * 8}
+    )
+    hourly_range = (datetime.datetime(2025, 4, 6, 23), datetime.datetime(2025, 4, 7, 0))
+    result = Report.to_api_intervals(df, ["value"], "kwartier", hourly_range)
+    assert list(result["interval_minutes"]) == [60] + [15] * 4
+    assert list(result["value"]) == [1.0] + [0.25] * 4

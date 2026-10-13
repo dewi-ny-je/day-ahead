@@ -3517,18 +3517,18 @@ class Report(DaBase):
         df_result.index = df_result["time"]
         return df_result
 
-    def get_hourly_start(
+    def get_hourly_range(
             self, vanaf: datetime.datetime, tot: datetime.datetime
-    ) -> datetime.datetime | None:
+    ) -> tuple[datetime.datetime, datetime.datetime] | None:
         """
-        Bepaalt vanaf welk moment de prognoses per uur zijn berekend.
+        Bepaalt in welk deel van de horizon de prognoses per uur zijn berekend.
         Met een kwartier-interval en een verlengde horizon (prices.prediction.extension)
         rekent de optimalisering in het deel met voorspelde prijzen per uur.
         Dat deel herkennen we aan de prognoses zelf: de laatste reeks
         prognoses die precies een uur uit elkaar liggen.
         :param vanaf: begin van de gevraagde periode
         :param tot: einde van de gevraagde periode
-        :return: het begin van het uur-deel of None als er geen uur-deel is
+        :return: (begin, einde) van het uur-deel of None als er geen uur-deel is
         """
         if self.interval != "15min":
             return None
@@ -3546,32 +3546,37 @@ class Report(DaBase):
         if first == len(moments) - 1:
             # de laatste prognoses liggen een kwartier uit elkaar
             return None
-        return datetime.datetime.fromtimestamp(moments[first])
+        return (
+            datetime.datetime.fromtimestamp(moments[first]),
+            datetime.datetime.fromtimestamp(moments[-1] + 3600),
+        )
 
     @staticmethod
     def to_api_intervals(
             df: pd.DataFrame,
             value_columns: list,
             interval: str,
-            hourly_start: datetime.datetime | None = None,
+            hourly_range: tuple[datetime.datetime, datetime.datetime] | None = None,
     ) -> pd.DataFrame:
         """
         Zet de data van de api om naar de intervallen waarmee is gerekend:
-        vanaf hourly_start (het deel met voorspelde prijzen) worden de
-        kwartieren per uur samengevoegd. Er komt een kolom "interval_minutes" bij
+        binnen hourly_range (het deel met voorspelde prijzen) worden de
+        kwartieren per uur samengevoegd; daarna (bijv. de verlengde pv-prognose)
+        blijft de resolutie van het interval. Er komt een kolom "interval_minutes" bij
         met de lengte van elk interval.
         :param df: dataframe met een kolom "time" (begintijdstip) en "datasoort"
         :param value_columns: de kolommen met hoeveelheden (worden opgeteld)
         :param interval: "kwartier" of "uur"
-        :param hourly_start: als != None het begin van het uur-deel
+        :param hourly_range: als != None (begin, einde) van het uur-deel
         :return: dataframe gesorteerd op tijd
         """
         df = df.copy()
         df["time"] = pd.to_datetime(df["time"])
         minutes = int(interval_delta(interval).total_seconds() // 60)
         df["interval_minutes"] = minutes
-        if hourly_start is not None and minutes < 60:
-            mask = df["time"] >= hourly_start
+        if hourly_range is not None and minutes < 60:
+            hourly_start, hourly_end = hourly_range
+            mask = (df["time"] >= hourly_start) & (df["time"] < hourly_end)
             if mask.any():
                 hourly = df[mask].copy()
                 hourly["time"] = hourly["time"].dt.floor("h")
@@ -3612,9 +3617,9 @@ class Report(DaBase):
             if self.periodes[periode]["interval"] in INTRADAY_INTERVALS
             else None
         )
-        hourly_start = None
+        hourly_range = None
         if interval == "kwartier":
-            hourly_start = self.get_hourly_start(self.periodes[periode]["vanaf"], tot)
+            hourly_range = self.get_hourly_range(self.periodes[periode]["vanaf"], tot)
         df = pd.DataFrame()
         # kolommen met hoeveelheden per interval, en welke daarvan een energie zijn
         value_columns = []
@@ -3671,7 +3676,7 @@ class Report(DaBase):
             return result
 
         if interval is not None and len(value_columns) > 0:
-            df = self.to_api_intervals(df, value_columns, interval, hourly_start)
+            df = self.to_api_intervals(df, value_columns, interval, hourly_range)
             if not cumulate:
                 # gemiddeld vermogen (kW) per interval in plaats van energie (kWh),
                 # zodat kwartieren en uren met elkaar te vergelijken zijn
