@@ -405,7 +405,7 @@ def task_exec():
         case "update_prices":
             cmd = ["prices"]
         case "predicted_prices":
-            cmd = ["predicted_prices"]
+            cmd = ["get_predicted_prices"]
         case "train_ml":
             cmd = ["train"]
 

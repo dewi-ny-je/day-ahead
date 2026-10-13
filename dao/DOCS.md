@@ -1643,9 +1643,9 @@ doorgezet naar Home Assistant.
 * ```tibber```: haalt verbruiksgegevens (consumption, production, cost, profit) op bij Tibber en slaat deze op in de database<br/>
 * ```meteo```: haalt prognose van meteogegevens op bij Meteoserver en slaat deze op in de database
 * ```prices```: haalt de day-ahead prijzen voor de volgende dag op en slaat deze op in de database<br/>
-* ```predicted_prices```, ```calc_baseloads```, ```train_ml_predictions``` en ```clean```: dezelfde taken als in het scheduler-overzicht.
+* ```get_predicted_prices```, ```calc_baseloads```, ```train_ml_predictions``` en ```clean```: dezelfde taken als in het scheduler-overzicht.
 
-De oude namen ```calc_zonder_debug```, ```calc_met_debug```, ```get_tibber```, ```get_meteo``` en ```get_prices``` werken nog steeds.<br/>
+De oude namen ```calc_zonder_debug```, ```calc_met_debug```, ```get_tibber```, ```get_meteo```, ```get_prices``` en ```predicted_prices``` werken nog steeds.<br/>
 
 Een uitgewerkt voorbeeld hoe je vanuit Home Assistant een berekening kunt starten:<br/>
 - Maak een (of meer) rest-commands aan. <br/>
