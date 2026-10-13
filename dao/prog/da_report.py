@@ -79,7 +79,7 @@ class Report(DaBase):
 
         self.report_options = self.config.report
         if self.report_options is None:
-            logging.error(f"Er zijn geen report-instellingen gevonden")
+            logging.error("Er zijn geen report-instellingen gevonden")
         # het kleinste rapportage-interval volgt de resolutie van de optimalisering
         self.report_interval = "kwartier" if self.interval == "15min" else "uur"
         self.make_periodes(_now=_now)
@@ -3182,7 +3182,7 @@ class Report(DaBase):
             row_ts = [
                 u if pd.notnull(u)
                 else datetime.datetime.strptime(t, "%Y-%m-%d %H:%M").timestamp()
-                for u, t in zip(df_da["utc"], df_da["time"])
+                for u, t in zip(df_da["utc"], df_da["time"], strict=False)
             ]
             durations = interval_durations(row_ts)
         for index, row in enumerate(df_da.itertuples()):
@@ -3295,7 +3295,7 @@ class Report(DaBase):
         durations = interval_durations(prod_ts)
         ends = []
         eligible = []
-        for row_ts, row_kwh, row_duration in zip(prod_ts, prod_values, durations):
+        for row_ts, row_kwh, row_duration in zip(prod_ts, prod_values, durations, strict=False):
             # uurwaarden gelijkmatig over de kwartieren verdelen, zodat
             # prijs en tijdvenster per kwartier worden beoordeeld
             for ts, duration, kwh in split_quarters(

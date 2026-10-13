@@ -318,7 +318,7 @@ class DBmanagerObj:
             variabel_table = self.get_table("variabel")
             df = df.reset_index()  # make sure indexes pair with number of rows
             records = []
-            for code, time, value in zip(df["code"], df["time"], df["value"]):
+            for code, time, value in zip(df["code"], df["time"], df["value"], strict=False):
                 if not isinstance(value, (int, float)):
                     continue
                 if pd.isna(value):

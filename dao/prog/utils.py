@@ -361,7 +361,7 @@ def power_weighted_efficiency(stages: list[dict]) -> float:
         return sum(efficiency for _, efficiency in points) / len(points)
 
     area = 0.0
-    for (power_low, eff_low), (power_high, eff_high) in zip(points, points[1:]):
+    for (power_low, eff_low), (power_high, eff_high) in zip(points, points[1:], strict=False):
         area += (eff_low + eff_high) / 2 * (power_high - power_low)
     return area / span
 

@@ -439,7 +439,7 @@ class DaBase(hass.Hass):
         # in een keer opbouwen: rij voor rij toevoegen met .loc kost per rij
         # bijna een milliseconde
         df_db = pd.DataFrame(rows, columns=["time", "code", "value"])
-        logging.debug("Save calculated data:\n{}".format(df_db.to_string()))
+        logging.debug(f"Save calculated data:\n{df_db.to_string()}")
         self.db_da.savedata(df_db, tablename=tablename)
         return
 

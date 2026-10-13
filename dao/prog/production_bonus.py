@@ -44,7 +44,7 @@ class ProductionBonus:
         observer.horizon = "-0:34"
         local_noon = datetime.datetime(day.year, day.month, day.day, 12).timestamp()
         observer.date = ephem.Date(
-            datetime.datetime.fromtimestamp(local_noon, datetime.timezone.utc).replace(
+            datetime.datetime.fromtimestamp(local_noon, datetime.UTC).replace(
                 tzinfo=None
             )
         )
@@ -57,8 +57,8 @@ class ProductionBonus:
         except ephem.NeverUpError:
             return local_noon, local_noon
         return (
-            rising.replace(tzinfo=datetime.timezone.utc).timestamp(),
-            setting.replace(tzinfo=datetime.timezone.utc).timestamp(),
+            rising.replace(tzinfo=datetime.UTC).timestamp(),
+            setting.replace(tzinfo=datetime.UTC).timestamp(),
         )
 
     def _fixed_window(self, day: datetime.date) -> tuple[float, float]:

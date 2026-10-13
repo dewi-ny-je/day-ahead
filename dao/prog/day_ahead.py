@@ -161,8 +161,8 @@ class DaCalc(DaBase):
         if pred_price_data is None or len(pred_price_data) == 0:
             if horizon_extension > 0:
                 logging.warning(
-                    f"Er zijn geen voorspelde prijzen na de day-ahead tarieven, "
-                    f"er wordt gerekend zonder verlenging van de horizon"
+                    "Er zijn geen voorspelde prijzen na de day-ahead tarieven, "
+                    "er wordt gerekend zonder verlenging van de horizon"
                 )
             horizon_extension = 0
             price_data = fixed_price_data
@@ -263,7 +263,7 @@ class DaCalc(DaBase):
 
         # base load
         if self.use_calc_baseload:
-            logging.info(f"Zelf berekende baseload")
+            logging.info("Zelf berekende baseload")
             # de dag van de berekening, niet de klok: de run van 00:00 start
             # een paar seconden eerder en hoort al bij de nieuwe dag
             weekday = start_dt.weekday()
@@ -2366,7 +2366,7 @@ class DaCalc(DaBase):
                 hours_avail = math.floor(interval_avail * self.interval_s / 3600)
                 logging.info(f"Beschikbaar zijn: {hours_avail} uur")
                 if heat_needed > 0:
-                    logging.info(f"On/off warmtepomp wordt ingepland")
+                    logging.info("On/off warmtepomp wordt ingepland")
                     avg_temp_today = self.meteo.get_avg_temperature(date=calc_day)
                     logging.info(
                         f"Gem. buitentemperatuur vandaag: {avg_temp_today:.1f} °C"

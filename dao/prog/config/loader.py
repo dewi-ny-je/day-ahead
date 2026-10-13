@@ -109,7 +109,7 @@ class ConfigurationLoader:
         # *lezing* van de configuratie de scheduler herstarten en gunicorn
         # herladen, waarna die de configuratie weer lezen: een eindeloze lus.
         # Alleen een migratie schrijft echt en opent het bestand daarvoor apart.
-        with open(self.config_path, "r", encoding="utf-8") as f:
+        with open(self.config_path, encoding="utf-8") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_SH)
 
             # Load raw config

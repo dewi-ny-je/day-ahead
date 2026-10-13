@@ -40,7 +40,7 @@ def subdivide(curve):
     sentinel = [s for s in curve if s["power"] <= 0]
     points = [s for s in curve if s["power"] > 0]
     out = [points[0]]
-    for low, high in zip(points, points[1:]):
+    for low, high in zip(points, points[1:], strict=False):
         out.append(
             {
                 "power": (low["power"] + high["power"]) / 2,

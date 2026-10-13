@@ -3,7 +3,7 @@ Pricing configuration models.
 """
 
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -82,7 +82,7 @@ class ProductionBonusConfig(BaseModel):
             "x-ui-section": "Production bonus",
         },
     )
-    annual_cap: Optional[float] = Field(
+    annual_cap: float | None = Field(
         default=None,
         ge=0,
         alias="annual cap",
@@ -305,7 +305,7 @@ class PricingConfig(BaseModel):
             "x-ui-section": "Taxes",
         },
     )
-    production_bonus: Optional[ProductionBonusConfig] = Field(
+    production_bonus: ProductionBonusConfig | None = Field(
         default=None,
         alias="production bonus",
         description="Supplier bonus on feed-in during a daily time window",

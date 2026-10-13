@@ -120,7 +120,7 @@ class TestFallBackDay:
         df = report.get_price_data(DST_START, DST_END, interval="1hour")
         assert len(df) == 25
         utc_hours = sorted({u // 3600 for u in values})
-        for row, hour in zip(df.itertuples(), utc_hours):
+        for row, hour in zip(df.itertuples(), utc_hours, strict=False):
             assert row.da_ex == pytest.approx(values[hour * 3600])
         # both 02:00 hours lie inside the window
         times = [t.strftime("%H:%M") for t in df["time"]]

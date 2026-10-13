@@ -264,7 +264,7 @@ class TestHelpers:
         prices = [0.10, -0.05, 0.10, 0.10]
         eligible = sum(
             bonus.eligible_kwh(t, d, kwh, price, 0.02)
-            for (t, d, kwh), price in zip(split_quarters(hour, 3600, 4.0), prices)
+            for (t, d, kwh), price in zip(split_quarters(hour, 3600, 4.0), prices, strict=False)
         )
         assert eligible == pytest.approx(3.0)
 

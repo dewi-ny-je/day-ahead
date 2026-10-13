@@ -33,8 +33,8 @@ def _bar(ax, x, height, width=0.8, bottom=None, align="center", label=None, colo
     intervals the calc chart has thousands of them, and creating, laying out
     and drawing those dominates the run time of a calculation.
     """
-    import numpy as np
     import matplotlib as mpl
+    import numpy as np
     from matplotlib.collections import PolyCollection
 
     ax.xaxis.update_units(x)
@@ -108,7 +108,7 @@ def ensure_png(images_dir: str, png_name: str) -> bool:
     if not os.path.exists(data_path):
         return False
     try:
-        with open(data_path, "r") as f:
+        with open(data_path) as f:
             data = json.load(f)
         draw_calc_graph(data, png_path)
     except Exception as ex:
@@ -159,10 +159,11 @@ def _atomic_write(path: str, content: bytes):
 
 def draw_calc_graph(data: dict, png_path: str):
     import io
-    import numpy as np
+
+    import matplotlib.dates as mdates
     import matplotlib.style
     import matplotlib.ticker as ticker
-    import matplotlib.dates as mdates
+    import numpy as np
     from matplotlib.figure import Figure
 
     logging.getLogger("matplotlib").setLevel(logging.WARNING)

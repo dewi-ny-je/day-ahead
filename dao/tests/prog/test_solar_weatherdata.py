@@ -118,7 +118,7 @@ def _full_day(offset: float) -> dict:
 
 def _at(frame, hour: int, column: str):
     """De waarde van een kolom op een uur van DAY."""
-    moment = (DAY + dt.timedelta(hours=hour)).astimezone(dt.timezone.utc)
+    moment = (DAY + dt.timedelta(hours=hour)).astimezone(dt.UTC)
     return frame.loc[moment, column]
 
 
