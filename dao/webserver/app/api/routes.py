@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from pathlib import Path
 from subprocess import run as subprocess_run
@@ -12,7 +13,7 @@ from dao.prog.da_report import Report
 api = Blueprint("api", __name__)
 
 # globals
-app_datapath = "app/static/data/"
+app_datapath = os.environ.get("DAO_WEB_DATA_DIR", "app/static/data").rstrip("/") + "/"
 BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
 PROG_DIR = BASE_DIR / "prog"
 
@@ -65,39 +66,46 @@ LEGACY_TASK_NAMES = {
 
 @api.route("/run/<string:task>", methods=["GET", "POST"])
 def run_api(task: str):
-    task = LEGACY_TASK_NAMES.get(task, task)
-    if task in tasks.keys():
-        proc = subprocess_run(
-            tasks[task]["cmd"],
-            cwd=PROG_DIR,
-            capture_output=True,
-            text=True
-        )
-        data = proc.stdout
-        err = proc.stderr
-        log_content = data + err
-        filename = (
-                "../data/log/"
-                + tasks[task]["file_name"]
-                + "_"
-                + datetime.now().strftime("%Y-%m-%d__%H:%M:%S")
-                + ".log"
-        )
-        with open(filename, "w") as f:
-            f.write(log_content)
+    def find_task(cmd: str) -> str | None:
+        for key, task_def in tasks.items():
+            if cmd == key or cmd in task_def.get("aliases", []):
+                return key
+        return None
 
-        headers = {
-            "Content-Type": "text/plain",
-        }
-        # een mislukte taak ook als fout melden, met het log erbij
-        status = 200 if proc.returncode == 0 else 500
-        return log_content, status, headers
-    else:
+    matched_task = find_task(task) or find_task(LEGACY_TASK_NAMES.get(task, task))
+
+    if matched_task is None:
         return (
             "Onbekende bewerking: " + str(escape(task)),
             400,
             {"Content-Type": "text/plain; charset=utf-8"},
         )
+
+    proc = subprocess_run(
+        tasks[matched_task]["cmd"],
+        cwd=PROG_DIR,
+        capture_output=True,
+        text=True
+    )
+    data = proc.stdout
+    err = proc.stderr
+    log_content = data + err
+    filename = (
+            "../data/log/"
+            + tasks[matched_task]["file_name"]
+            + "_"
+            + datetime.now().strftime("%Y-%m-%d__%H:%M:%S")
+            + ".log"
+    )
+    with open(filename, "w") as f:
+        f.write(log_content)
+
+    headers = {
+        "Content-Type": "text/plain",
+    }
+    # een mislukte taak ook als fout melden, met het log erbij
+    status = 200 if proc.returncode == 0 else 500
+    return log_content, status, headers
 
 
 @api.route("/data/")

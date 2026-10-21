@@ -37,6 +37,7 @@ class HeatingStage(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "x-help": "Define heat pump performance curve by power stages and corresponding COP values. Multiple stages allow accurate modeling of variable-speed compressors.",
             "x-ui-section": "General",
@@ -60,6 +61,7 @@ class HeatingDisabled(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "x-ui-group": "Heating",
             "x-icon": "heat-pump",
@@ -99,6 +101,22 @@ class HeatingEnabled(BaseModel):
             "x-unit": "factor",
             "x-ui-section": "Configuration",
             "x-validation-hint": "Must be > 0, typically 0.5-10.0",
+        },
+    )
+    degree_days_base_temperature: float = Field(
+        default=16.0,
+        ge=0.0,
+        le=30.0,
+        description="Base temperature (heating limit) for degree days",
+        json_schema_extra={
+            "x-help": "Average daily outdoor temperature in °C at and above which no heating is needed (the heating limit). "
+            "Heat demand is calculated from the degree days below this temperature: "
+            "(base temperature - average outdoor temperature) per day. "
+            "Raise it if your heating starts at a higher outdoor temperature, lower it for a well-insulated house. "
+            "Default: 16 °C.",
+            "x-unit": "°C",
+            "x-ui-section": "Configuration",
+            "x-validation-hint": "Between 0 and 30, typically 15-18",
         },
     )
     adjustment: Literal["on/off", "power", "heating curve"] = Field(
@@ -224,6 +242,7 @@ class HeatingEnabled(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "title": "HeatingConfig",
             "x-ui-group": "Heating",

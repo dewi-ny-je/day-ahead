@@ -162,8 +162,8 @@ def draw_calc_graph(data: dict, png_path: str):
 
     import matplotlib.dates as mdates
     import matplotlib.style
-    import matplotlib.ticker as ticker
     import numpy as np
+    from matplotlib import ticker
     from matplotlib.figure import Figure
 
     logging.getLogger("matplotlib").setLevel(logging.WARNING)

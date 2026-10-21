@@ -34,7 +34,7 @@ def inject_data():
     }
 
 # globals
-app_datapath = "app/static/data/"
+app_datapath = os.environ.get("DAO_WEB_DATA_DIR", "app/static/data").rstrip("/") + "/"
 
 VITE_DEV_PORT = os.getenv("VITE_DEV_PORT", "5173")
 VITE_MANIFEST = Path("app/static/build/.vite/manifest.json")
@@ -392,8 +392,7 @@ def task_cancel():
         state = get_task_state()
         state["status"] = "cancelled"
         save_task_state(state)
-        from dao.prog.da_const import tasks
-        return render_template("v2/tasks.html", tasks=tasks)
+        return redirect(url_for('v2.task_state'))
     except Exception:
         return "Error cancelling task", 500
 
@@ -408,7 +407,7 @@ def task_exec():
 
     task_name = request.form.to_dict()["task"]
 
-    if task_name not in tasks.keys():
+    if task_name not in tasks:
         return "Invalid task", 500
 
     # Save the state synchronous to prevent race condition
@@ -422,7 +421,10 @@ def task_exec():
     save_task_state(state)
 
     cmd = tasks[task_name]["cmd"].copy()
-    cmd[1] ="../prog/day_ahead.py"
+    cmd[1] = "../prog/day_ahead.py"
+
+    if task_name == "get_day_ahead_prices":
+        cmd.append(datetime.date.today().strftime("%Y-%m-%d"))
 
     threading.Thread(
         target=run_and_log,
@@ -506,7 +508,7 @@ def reports_gen(subject: str, view: str, period: str, solar_item=None, date: dat
             report_df, interval, view
         )
     elif subject == "balans":
-        report_df, lastmoment = report.get_energy_balance_data(
+        report_df, _lastmoment = report.get_energy_balance_data(
             period, _tot=tot
         )
         report_df = report.calc_balance_columns(
@@ -655,7 +657,7 @@ def solar():
         date=date_str,
         subject_options=[
             {"label": key, "value": key}
-            for key in solar_items.keys()
+            for key in solar_items
         ]
     )
 
@@ -694,16 +696,30 @@ def config():
     error = None
     success = None
 
+    tmp_file = Path('/tmp/options_tmp.json')
+
     if request.method == "POST" and request.form.to_dict()["config"] is not None:
         content = request.form.to_dict()["config"]
         try:
             # try loading json
             json.loads(content)
+
+            with open(tmp_file, "w") as tmp_f:
+                tmp_f.write(content)
+
+            loader = ConfigurationLoader(tmp_file)
+            loader.load_and_validate()
+
             with open(path, "w") as f:
                 f.write(content)
             success = "Config updated successfully"
+            Path.unlink(tmp_file)
         except Exception as err:
             error = f"Error: {err}"
+
+            if Path.exists(tmp_file):
+                Path.unlink(tmp_file)
+
     else:
         with open(path) as file:
             content = file.read()
