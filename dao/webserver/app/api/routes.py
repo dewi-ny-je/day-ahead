@@ -48,31 +48,16 @@ def api_report(fld: str, periode: str):
     return result, headers
 
 
-# Namen die /api/run/ vroeger accepteerde en die in bestaande HA-automatiseringen
-# (rest_command) staan; ze verwijzen naar de huidige taken.
-LEGACY_TASK_NAMES = {
-    "calc_zonder_debug": "calc_optimum",
-    "calc_met_debug": "calc_optimum_met_debug",
-    "get_tibber": "get_tibber_data",
-    "get_meteo": "get_meteo_data",
-    "get_prices": "get_day_ahead_prices",
-    "tibber": "get_tibber_data",
-    "meteo": "get_meteo_data",
-    "prices": "get_day_ahead_prices",
-    "clean": "clean_data",
-    "predicted_prices": "get_predicted_prices",
-}
-
-
 @api.route("/run/<string:task>", methods=["GET", "POST"])
 def run_api(task: str):
+
     def find_task(cmd: str) -> str | None:
-        for key, task_def in tasks.items():
-            if cmd == key or cmd in task_def.get("aliases", []):
+        for key, task in tasks.items():
+            if cmd == key or cmd in task.get("aliases", []):
                 return key
         return None
 
-    matched_task = find_task(task) or find_task(LEGACY_TASK_NAMES.get(task, task))
+    matched_task = find_task(task)
 
     if matched_task is None:
         return (
