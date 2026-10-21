@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: "Add-on to build when no release tag is given"
+        description: "Add-on to build when no release tag is given, or to bump when a new non-rc release tag is given"
         required: false
         default: stable
         type: choice
@@ -12,7 +12,7 @@ on:
           - stable
           - testing
       release_tag:
-        description: "Release tag to build (leave empty to use the version from config.yaml)"
+        description: "Release tag to build (leave empty to use the version from config.yaml; a new version is written into config.yaml and committed first)"
         required: false
         type: string
       architectures:
@@ -52,11 +52,86 @@ jobs:
       version: ${{ steps.detect.outputs.version }}
       image_tags: ${{ steps.detect.outputs.image_tags }}
       publish_manifest: ${{ steps.arch.outputs.publish_manifest }}
+      commit: ${{ steps.detect.outputs.commit }}
+
+    permissions:
+      contents: write
 
     steps:
 
       - name: Check out repository
         uses: actions/checkout@v7
+
+      # A manually given release tag that is in neither config.yaml is a new
+      # version: write it into the add-on's config.yaml and commit it, so the
+      # image is built from a tree that carries the version it is tagged with
+      - name: Write new version into config.yaml
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        shell: bash
+        env:
+          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
+          CHANNEL_INPUT: ${{ inputs.channel }}
+        run: |
+          VERSION="${RELEASE_TAG_INPUT#v}"
+          VERSION="${VERSION// /}"
+
+          DAO_VERSION=$(grep '^version:' dao/config.yaml | awk '{print $2}')
+          TEST_VERSION=$(grep '^version:' release-testing/config.yaml | awk '{print $2}')
+
+          if [[ "${VERSION}" == "${DAO_VERSION}" || "${VERSION}" == "${TEST_VERSION}" ]]; then
+            echo "${VERSION} is already in config.yaml, nothing to bump"
+            exit 0
+          fi
+
+          if [[ ! "${VERSION}" =~ ^[0-9]{4}\.[0-9]{1,2}\.[0-9]+(\.rc[0-9]*)?$ ]]; then
+            echo "::error::'${VERSION}' is not a valid version (expected 2026.9.2 or 2026.9.2.rc1)"
+            exit 1
+          fi
+
+          if [[ "${GITHUB_REF_TYPE}" != "branch" ]]; then
+            echo "::error::${VERSION} is not in config.yaml and ${GITHUB_REF_NAME} is not a branch the bump can be committed to"
+            exit 1
+          fi
+
+          # A release candidate always goes to the testing add-on
+          if [[ "${VERSION}" == *rc* ]]; then
+            APP_DIR="release-testing"
+          elif [[ "${CHANNEL_INPUT:-stable}" == "testing" ]]; then
+            APP_DIR="release-testing"
+          else
+            APP_DIR="dao"
+          fi
+
+          CURRENT=$(grep '^version:' "${APP_DIR}/config.yaml" | awk '{print $2}')
+          sed -i -E "s|^version:.*|version: ${VERSION}|" "${APP_DIR}/config.yaml"
+          echo "${APP_DIR}/config.yaml: ${CURRENT} -> ${VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "${APP_DIR}/config.yaml"
+          git commit -m "${VERSION}"
+
+          for DELAY in 2 4 8 16 0; do
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              break
+            fi
+            if [[ "${DELAY}" == "0" ]]; then
+              echo "::error::Could not push the version bump"
+              exit 1
+            fi
+            echo "Push failed, retrying in ${DELAY}s"
+            sleep "${DELAY}"
+
+            # The branch may have moved on meanwhile, in which case every
+            # retry would be rejected again: replay the bump on top of it
+            git fetch origin "${GITHUB_REF_NAME}"
+            if ! git rebase FETCH_HEAD; then
+              git rebase --abort || true
+              echo "::error::${GITHUB_REF_NAME} changed and the version bump does not apply on top of it"
+              exit 1
+            fi
+          done
 
       - name: Detect release type
         id: detect
@@ -71,7 +146,8 @@ jobs:
 
           RELEASE_TAG="${RELEASE_TAG_EVENT}"
           if [[ -z "$RELEASE_TAG" ]]; then
-            RELEASE_TAG="${RELEASE_TAG_INPUT}"
+            RELEASE_TAG="${RELEASE_TAG_INPUT#v}"
+            RELEASE_TAG="${RELEASE_TAG// /}"
           fi
           if [[ -z "$RELEASE_TAG" ]]; then
             # No tag given: take the version straight from config.yaml
@@ -87,6 +163,9 @@ jobs:
           echo "Release tag:     ${RELEASE_TAG}"
           echo "DAO version:     ${DAO_VERSION}"
           echo "Testing version: ${TEST_VERSION}"
+
+          # The commit checked out here, including a version bump made above
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
           if [[ "${RELEASE_TAG}" == "${DAO_VERSION}" ]]; then
             echo "Detected stable release"
@@ -178,6 +257,8 @@ jobs:
 
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.init.outputs.commit }}
 
       - name: Prepare testing build context
         if: needs.init.outputs.app_dir == 'release-testing'
