@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 from pandas.core.dtypes.inference import is_number
-from sklearn.metrics import r2_score
 from sqlalchemy import (
     BigInteger,
     String,
@@ -60,6 +59,7 @@ def calc_r2(serie_x: pd.Series, serie_y: pd.Series) -> float:
     if serie_x.count() < 24 or serie_y.count() < 24:
         return pd.NA
     # imported here to speed up the runs which don't need it
+    from sklearn.metrics import r2_score
 
     return r2_score(serie_x, serie_y)
 
