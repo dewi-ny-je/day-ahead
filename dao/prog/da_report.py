@@ -3601,7 +3601,9 @@ class Report(DaBase):
                 hourly = hourly.groupby("time", as_index=False).agg(agg)
                 hourly["interval_minutes"] = 60
                 df = pd.concat([df[~mask], hourly], ignore_index=True)
-        df = df.sort_values("time").reset_index(drop=True)
+        # stabiel sorteren: bij het einde van de zomertijd blijft van twee
+        # gelijke tijden die van de zomertijd voorop
+        df = df.sort_values("time", kind="stable").reset_index(drop=True)
         return df
 
     def get_api_data(self, field: str, _periode: str, cumulate: bool = False):
@@ -3723,14 +3725,16 @@ class Report(DaBase):
                 # zodat kwartieren en uren met elkaar te vergelijken zijn
                 for col in energy_columns:
                     df[col] = df[col] / (df["interval_minutes"] / 60)
+        df["time"] = pd.to_datetime(df["time"])
+        df["time_ts"] = localize_local_times(df["time"], self.time_zone)
+        # op het werkelijke tijdstip, zodat het dubbele uur aan het einde van
+        # de zomertijd in de goede volgorde staat, ook voor het cumuleren
+        df = df.sort_values("time_ts", kind="stable").reset_index(drop=True)
         if cumulate:
             for col in value_columns:
                 df[col] = df[col].cumsum()
-
-        df["time"] = pd.to_datetime(df["time"])
         if _tot is not None:
             df = df[df["time"] < _tot].copy()
-        df["time_ts"] = localize_local_times(df["time"], self.time_zone)
         df["time"] = df["time"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M"))
         df.rename(columns={"datasoort": "datatype"}, inplace=True)
         cols = df.columns.tolist()
