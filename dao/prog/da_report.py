@@ -33,7 +33,7 @@ from dao.prog.production_bonus import (
     interval_durations,
     split_quarters,
 )
-from dao.prog.utils import get_value_from_dict
+from dao.prog.utils import get_value_from_dict, localize_local_times
 
 # Rapportage-intervallen die een deel van een dag beschrijven.
 # "kwartier" wordt gebruikt als de optimalisering met een resolutie van 15 minuten draait.
@@ -3730,7 +3730,7 @@ class Report(DaBase):
         df["time"] = pd.to_datetime(df["time"])
         if _tot is not None:
             df = df[df["time"] < _tot].copy()
-        df["time_ts"] = df["time"].dt.tz_localize(self.time_zone)
+        df["time_ts"] = localize_local_times(df["time"], self.time_zone)
         df["time"] = df["time"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M"))
         df.rename(columns={"datasoort": "datatype"}, inplace=True)
         cols = df.columns.tolist()
