@@ -33,6 +33,9 @@ from dao.prog.version import __version__
 
 # from dao.prog.solar_predictor import SolarPredictor
 
+# maximale wachttijd in seconden voor een request aan de api van Home Assistant
+HA_TIMEOUT = 10
+
 
 @dataclass
 class HAContext:
@@ -152,12 +155,16 @@ class DaBase(hass.Hass):
         else:
             self.hasstoken = _tok.resolve(self.loader.secrets)
 
-        super().__init__(hassurl=self.hassurl, token=self.hasstoken, timeout=10)
+        super().__init__(hassurl=self.hassurl, token=self.hasstoken, timeout=HA_TIMEOUT)
         headers = {
             "Authorization": "Bearer " + self.hasstoken,
             "content-type": "application/json",
         }
-        resp = get(self.hassurl + "api/config", headers=headers)
+        resp = get(self.hassurl + "api/config", headers=headers, timeout=HA_TIMEOUT)
+        if not resp.ok:
+            raise RuntimeError(
+                f"Home Assistant api/config gaf statuscode {resp.status_code}"
+            )
         resp_dict = json.loads(resp.text)
         logging.debug(f"hass/api/config: {resp.text}")
         self.ha_context = HAContext(

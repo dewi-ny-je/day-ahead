@@ -11,6 +11,7 @@ from nordpool.elspot import Prices as NordpoolPrices
 from requests import get, post
 
 from dao.lib.db_manager import DBmanagerObj
+from dao.prog.utils import HTTP_TIMEOUT
 
 
 class DaPrices:
@@ -227,7 +228,7 @@ class DaPrices:
             "Authorization": "Bearer " + api_token,
             "content-type": "application/json",
         }
-        resp = post(url, headers=headers, data=query)
+        resp = post(url, headers=headers, data=query, timeout=HTTP_TIMEOUT)
         tibber_dict = json.loads(resp.text)
         today_nodes = tibber_dict["data"]["viewer"]["homes"][0][
             "currentSubscription"
@@ -265,7 +266,7 @@ class DaPrices:
                 + "&endTimestamp="
                 + endstr
         )
-        resp = get(url)
+        resp = get(url, timeout=HTTP_TIMEOUT)
         logging.debug(resp.text)
         json_object = json.loads(resp.text)
         df = pd.DataFrame.from_records(json_object)
@@ -514,7 +515,7 @@ class DaPrices:
         if key is not None:
             api_url= api_url.replace("<key>", key)
         try:
-            resp = get(api_url, timeout=60)
+            resp = get(api_url, timeout=HTTP_TIMEOUT)
         except Exception as ex:
             logging.error(f"No data from {source} off predict prices: {ex}")
             return False
