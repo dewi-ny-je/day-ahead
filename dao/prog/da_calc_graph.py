@@ -68,7 +68,10 @@ def _grid(ax, x, over_areas=True):
     ax.grid(False, axis="x")
     if rc["axes.grid.axis"] not in ("both", "x"):
         return
+    # only lines inside the drawn time range, so they don't widen the x axis
     t = x[0].replace(hour=x[0].hour - x[0].hour % 6, minute=0, second=0, microsecond=0)
+    if t < x[0]:
+        t += datetime.timedelta(hours=6)
     end = x[-1] + (x[-1] - x[-2])
     while t <= end:
         ax.axvline(
@@ -586,6 +589,9 @@ def draw_calc_graph(data: dict, png_path: str):
         labels = [line.get_label() for line in lns]
         axis22.legend(lns, labels, loc="best", bbox_to_anchor=(1.40, 1.00))
 
+        # all charts share the x axis: from the start of the first interval
+        # to the end of the last one, without margins
+        axis[0].set_xlim(tijd[0], tijd[U])
         fig.subplots_adjust(right=0.75)
         fig.tight_layout()
         buf = io.BytesIO()
