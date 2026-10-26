@@ -172,7 +172,9 @@ class TestHourlyAverage:
             db, *a, **k
         ).iloc[:1]
         df = report.get_price_data(start, start + datetime.timedelta(hours=1))
-        assert list(df.columns) == ["time", "da_ex", "da_cons", "da_prod", "datasoort"]
+        assert list(df.columns) == ["time", "da_ex", "da_cons", "da_prod", "datasoort", "slot"]
+        # "slot" is the start of the hour in UTC
+        assert df["slot"].iloc[0] == int(start.timestamp())
         assert df["da_prod"].iloc[0] == pytest.approx(0.10 + OL_T)
 
 
