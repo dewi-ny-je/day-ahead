@@ -17,15 +17,16 @@ The branch `dev` follows upstream `main` and carries everything listed below.
 
 | Feature | Purpose |
 | --- | --- |
-| Faster optimisation runs | Cuts about 1.5 s of fixed overhead from every calculation (lazy imports, no needless redraws). |
 | Calculation chart on demand | Saves the chart data after each run and draws the PNG only when it is opened in the web UI; `graphics` -> `generate png` restores the old behaviour. |
-| Bar series as one collection | Draws each bar series of the calculation chart as one collection, so 15-minute charts render much faster with identical output. |
 | Production bonus | Configurable bonus on feed-in (for example the Zonneplan Zonnebonus), from upstream PR 878, which is not merged there yet. |
 | Mixed weather models | Without a configured `meteoserver-model`, uses harmonie, and fetches gfs for the hours after harmonie only when price prediction extends the planning horizon beyond harmonie's 40 hours, so the extended hours also get weather data. A configured model is always used. |
 | Configuration reload | Every process picks up a changed `options.json` or `secrets.json` without a restart, so the dashboard and the API use the same settings as the calculation. |
-| Legacy API at the optimiser interval | `/api/report/...` returns quarter-hour values when the optimiser runs at `15min`, and hourly values in the part with predicted prices where the optimiser calculates per hour. Energy fields are average power in kW per interval, so quarters and hours are comparable; each record carries `interval_minutes`. |
+| Legacy API at the optimiser interval | `/api/report/...` returns quarter-hour values when the optimiser runs at `15min`, and hourly values in the part with predicted prices where the optimiser calculates per hour. Energy fields are average power in kW per interval, so quarters and hours are comparable; each record carries `interval_minutes`. Only the hourly part of the prognoses is merged to hours: the quarter-hour solar forecast beyond it keeps its resolution. |
+| Report data pushed to Home Assistant | `report` -> `ha_sensors` maps report fields (da, consumption, production, bat_in, bat_out, base, pv_ac, soc, ...) to HA entities. Each entity's state is the value of the current interval and its `data` attribute holds today and tomorrow as `/api/report/<field>/vandaag_en_morgen` does, so REST sensors polling the API are no longer needed. Energy series are in kW, every entity gets a `last_update` attribute, an entity used twice is rejected, and `include_price_prediction` extends the series to the predicted prices. |
+| Calculation chart as stepped areas | The energy-balance and battery charts of the calculation PNG fill each series as a stepped area, so intervals join up without gaps; gridlines every 6 hours are drawn over the areas, and the time axis runs exactly from the first to the last interval. |
+| Slimmer Docker image | Drops the CBC debug build, duplicate shared libraries, the NVIDIA NCCL dependency (xgboost-cpu), unused MySQL drivers, and the compilers, npm and headers in the runtime image; `build_miplib.sh` installs its toolchain itself when `use_self_compiled_miplib` is on. |
 | Same irradiance for ML and DAO solar predictions | Both predictors are fed the same measured/forecast irradiance, so their results can be compared. |
-| Release workflows | The version is typed once in `dao/config.yaml`, and the image is built for a single architecture when that is all you need. |
+| Release workflows | The version is typed once in `dao/config.yaml`, the image is built for a single architecture when that is all you need, and a manually given release tag that matches no `config.yaml` is written into it instead of stopping the build. |
 | Development setup | `run_dev.sh` detects and repairs a broken virtual environment; the Vite dev server works from another machine, behind a proxy and with several network addresses; troubleshooting notes in `DEVELOP.md`. |
 
 ### Fixes not in upstream
@@ -33,9 +34,14 @@ The branch `dev` follows upstream `main` and carries everything listed below.
 | Fix | Purpose |
 | --- | --- |
 | Battery value at the end of the horizon | Averages the DC-to-AC efficiency over the power axis, not over table rows. The impact on prediction is basically none, but at least it has a physical basis, while averaging on bare table rows has none. |
-| Cancelled tasks | A cancelled task stays "cancelled" instead of being reported as an error. |
-| Database table reflection | Thread safe, so concurrent API calls no longer crash. |
-| 2026.10.0.rc1 issues | Calculation without predicted prices, price backfill range, debug capture, baseload in the prediction tail, day of the 00:00 run, old `/api/run` names, legacy UI under HA ingress, Reports V2 chart race, EV schedule length, DST night in the prognoses, null prediction settings, old CO2 setting name. |
+| Network loss | Scheduled tasks are killed after 30 minutes, HTTP requests time out (10 s for Home Assistant, 60 s for the others), and MySQL and PostgreSQL connections get driver timeouts and keepalives, so a lost connection no longer blocks the scheduler until a restart. |
+| Report API errors | `/api/report/...` answers with a JSON reason: 503 when Home Assistant or the database cannot be reached, 500 otherwise, instead of Flask's HTML error page. |
+| Daylight saving time in reports | The report API no longer fails on the day DST ends, and the repeated 02:00 hour stays a separate row instead of being added to the first one; hourly rows are grouped by their UTC start. |
+| Consolidate task | Runs to the end and saves the hourly cost and profit, continues after the last consolidated hour, stores local hours instead of hours shifted by the UTC offset, and keeps both repeated hours at the end of DST. |
+| Predicted quarter-hour prices | Sources that predict per quarter (epexpredictor, energypriceforecast_eu, jeroen_nl) no longer return each predicted slot up to four times; only hourly predictions are interpolated. |
+| Baseload of the first interval | A run that starts partway through an interval scales the first interval's baseload in the unoptimised reference, the "Overig verbr." bar, "Cost before optimize" and the logged prognoses table, as the optimisation already did. |
+| `prices_spot: false` | The calculation PNG no longer draws the spot price line when it is disabled. |
+| Task exit codes | A failed optimisation or price prediction exits with code 1, `day_ahead.py` stops at the first failed task, and `/api/run/` answers 500 when the task fails. |
 | Smaller fixes | Empty-state page of the v2 chart view, Sass deprecation warnings, `.DS_Store` ignored. |
 
 ---
