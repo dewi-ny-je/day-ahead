@@ -221,6 +221,15 @@ class DBmanagerObj:
         else:  # mysql/mariadb
             return func.date_format(func.from_unixtime(column), "%Y-%m-%d %H:00")
 
+    @staticmethod
+    def hour_slot(column) -> func:
+        """
+        Het begin van het uur waarin "column" (een unix-timestamp) valt, als
+        unix-timestamp. Anders dan een lokale kloktijd is dit ook uniek voor het
+        uur dat bij de overgang naar wintertijd twee keer voorkomt.
+        """
+        return column - column % 3600
+
     def savedata(self, df: pd.DataFrame, tablename: str = "values"):
         """
         save data in dateframe,
@@ -549,7 +558,10 @@ class DBmanagerObj:
             result = connection.execute(query)
         df = pd.DataFrame(result.fetchall(), columns=result.keys())
         if agg_func is not None:
-            df = df.groupby("uur").agg(
+            # per uur in utc, zodat het dubbele uur bij de overgang naar
+            # wintertijd twee rijen houdt
+            slot = df["utc"] - df["utc"] % 3600
+            df = df.groupby(slot.rename(None)).agg(
                 {
                     "uur": "min",
                     "time": "min",

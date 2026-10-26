@@ -1034,11 +1034,14 @@ class Report(DaBase):
             )
             if agg != "uur":
                 query = query.group_by(agg)
+            else:
+                query = query.order_by(t2.c.start_ts)
         else:
             columns = [
                 self.db_ha.hour(t1.c.start_ts).label("uur"),
                 self.db_ha.from_unixtime(t1.c.start_ts).label("tijd"),
                 self.db_ha.from_unixtime(t1.c.start_ts).label("tot"),
+                t1.c.start_ts.label("utc"),
                 t1.c.mean.label(col_name),
                 v1.c.unit_of_measurement.label("dim"),
             ]
@@ -1056,6 +1059,7 @@ class Report(DaBase):
                     & (t1.c.start_ts >= self.db_ha.unix_timestamp(start_ts_param1))
                     & (t1.c.start_ts < self.db_ha.unix_timestamp(start_ts_param2))
                 )
+                .order_by(t1.c.start_ts)
             )
 
         # Execute the query and load results into a DataFrame
@@ -1069,6 +1073,9 @@ class Report(DaBase):
         df_raw["tijd"] = pd.to_datetime(df_raw["tijd"])
         df_raw.index = df_raw["tijd"]
         df_raw["tot"] = pd.to_datetime(df_raw["tot"])
+        if agg == "uur" and "utc" in df_raw.columns:
+            # HA bewaart de statistieken per heel uur in utc
+            df_raw["slot"] = df_raw["utc"].astype("float").round().astype("Int64")
 
         # when NaN in result replace with zero (0)
         df_raw[col_name] = df_raw[col_name].fillna(0)
@@ -1082,54 +1089,37 @@ class Report(DaBase):
 
         # fill 0 for missing records
         if (agg == "uur") and (sensor_type == "quantity"):
-            columns = list(df_raw.columns.values)
-            df_insert = pd.DataFrame(columns=columns)
-            """
-            # vanaf hier voor de test:
-            df_raw.reset_index(drop=True, inplace=True)
-            df_raw.drop([0, 1, 4, 5, 6, 13], inplace=True)
-            df_raw.index = df_raw["tijd"]
-            # tot hier voor de test
-            """
-            row = None
-
-            border = self.get_time_border_ha_record(sensor, latest=False)
-            border = vanaf if border is None else max(border, vanaf)
-            prev_time = pd.to_datetime(border - datetime.timedelta(hours=1))
-            for row in df_raw.itertuples():
-                new_tijd = prev_time + datetime.timedelta(hours=1)
-                while new_tijd < row.tijd:
-                    new_row_values = [
-                        new_tijd.strftime("%Y-%m-%d %H:%M")[11:14] + "00",
-                        pd.to_datetime(new_tijd),
-                        pd.to_datetime(new_tijd),
-                        new_tijd.timestamp(),
-                        0,
-                        row.dim,
-                    ]
-                    df_insert.loc[len(df_insert.index)] = new_row_values
-                    new_tijd += datetime.timedelta(hours=1)
-                prev_time = row.tijd
-            now = datetime.datetime.now()
-            tot = min(datetime.datetime(now.year, now.month, now.day, now.hour), tot)
-            if row is not None and row.tijd < tot - datetime.timedelta(hours=1):
-                new_tijd = row.tijd + datetime.timedelta(hours=1)
-                while new_tijd < tot:
-                    new_row_values = [
-                        new_tijd.strftime("%Y-%m-%d %H:%M")[11:14] + "00",
-                        pd.to_datetime(new_tijd),
-                        pd.to_datetime(new_tijd),
-                        new_tijd.timestamp(),
-                        0,
-                        row.dim,
-                    ]
-                    df_insert.loc[len(df_insert.index)] = new_row_values
-                    new_tijd += datetime.timedelta(hours=1)
+            df_insert = pd.DataFrame(columns=list(df_raw.columns.values))
+            if len(df_raw) > 0:
+                # de ontbrekende uren worden in utc geteld, zodat het dubbele
+                # uur bij de overgang naar wintertijd meetelt en het
+                # ontbrekende uur in maart niet wordt toegevoegd
+                border = self.get_time_border_ha_record(sensor, latest=False)
+                border = vanaf if border is None else max(border, vanaf)
+                now = datetime.datetime.now()
+                end = min(datetime.datetime(now.year, now.month, now.day, now.hour), tot)
+                present = {int(slot) for slot in df_raw["slot"]}
+                first_slot = int(border.timestamp()) // 3600 * 3600
+                end_slot = max(int(end.timestamp()), max(present))
+                dim = df_raw.iloc[-1]["dim"]
+                for slot in range(first_slot, end_slot, 3600):
+                    if slot in present:
+                        continue
+                    new_tijd = pd.to_datetime(datetime.datetime.fromtimestamp(slot))
+                    df_insert.loc[len(df_insert.index)] = {
+                        "uur": new_tijd.strftime("%H:00"),
+                        "tijd": new_tijd,
+                        "tot": new_tijd,
+                        "utc": slot,
+                        col_name: 0,
+                        "dim": dim,
+                        "slot": slot,
+                    }
 
             if len(df_insert) > 0:
                 df_insert.index = df_insert["tijd"]
                 df_raw = pd.concat([df_raw, df_insert])
-                df_raw.sort_index(inplace=True)
+                df_raw = df_raw.sort_values("slot", kind="stable")
         logging.debug(f"sensordata raw, sensor {sensor},\n {df_raw.to_string()}\n")
         return df_raw
 
@@ -1209,10 +1199,37 @@ class Report(DaBase):
             copy_to[col_name] = 0.0
         else:
             copy_to[col_name] = ""
+        positions = Report._slot_positions(copy_from, copy_to)
+        if positions is not None:
+            col = copy_to.columns.get_loc(col_name)
+            for source, target in positions:
+                copy_to.iat[target, col] = copy_from[col_name].iat[source]
+            return copy_to
         # copy_from = copy_from.reset_index()
         for row in copy_from.itertuples():
             copy_to.at[row.tijd, col_name] = copy_from.at[row.tijd, col_name]
         return copy_to
+
+    @staticmethod
+    def _slot_positions(
+            source: pd.DataFrame, target: pd.DataFrame
+    ) -> list[tuple[int, int]] | None:
+        """
+        Koppelt de rijen van source en target op hun uur in utc (kolom "slot").
+        Op lokale tijd kan dat niet: bij de overgang naar wintertijd komt het
+        uur van 02:00 twee keer voor.
+        :return: lijst van (positie in source, positie in target), of None als
+            een van beide geen volledige kolom "slot" heeft
+        """
+        for df in (source, target):
+            if "slot" not in df.columns or df["slot"].isna().any():
+                return None
+        target_of = {int(slot): pos for pos, slot in enumerate(target["slot"])}
+        return [
+            (pos, target_of[int(slot)])
+            for pos, slot in enumerate(source["slot"])
+            if int(slot) in target_of
+        ]
 
     @staticmethod
     def add_col_df(
@@ -1229,6 +1246,18 @@ class Report(DaBase):
         if col_name_to is None:
             col_name_to = col_name_from
         col_index = add_from.columns.get_loc(col_name_from) + 1
+        positions = Report._slot_positions(add_from, add_to)
+        if positions is not None:
+            col = add_to.columns.get_loc(col_name_to)
+            for source, target in positions:
+                value = add_from[col_name_from].iat[source]
+                if pd.isna(value):
+                    continue
+                org_value = add_to.iat[target, col]
+                if pd.isna(org_value):
+                    org_value = 0
+                add_to.iat[target, col] = org_value + factor * value
+            return add_to
         if "tijd" in add_from.columns:
             for row in add_from.itertuples():
                 # add_from.at[row.tijd, col_name_from])
@@ -1401,6 +1430,7 @@ class Report(DaBase):
                 "cost",
                 "profit",
                 "datasoort",
+                "slot",
             ]
         )
         if len(org_data_df.index) == 0:
@@ -1410,8 +1440,15 @@ class Report(DaBase):
                 continue
             if not isinstance(row.tijd, datetime.datetime):
                 print(row)
+            slot = None
             if interval == "uur":
                 tijd_str = str(row.tijd)[0:14] + "00"
+                # gegroepeerd per uur in utc: de lokale kloktijd is bij de
+                # overgang naar wintertijd voor twee uren gelijk
+                slot = getattr(row, "slot", None)
+                if pd.isna(slot):
+                    slot = pd.Timestamp(row.tijd).to_pydatetime().timestamp()
+                slot = int(slot) - int(slot) % 3600
             elif interval == "dag":
                 tijd_str = str(row.tijd)[0:10]
             else:
@@ -1436,20 +1473,25 @@ class Report(DaBase):
                 col_3,
                 col_4,
                 col_5,
+                slot,
             ]
 
-        fi_df = fi_df.groupby([interval], as_index=False).agg(
-            {
-                "vanaf": "min",
-                "tot": "max",
-                "consumption": "sum",
-                "production": "sum",
-                "cost": "sum",
-                "profit": "sum",
-                "datasoort": get_datasoort,
-            }
-        )
-        return fi_df
+        columns = fi_df.columns
+        group_column = "slot" if interval == "uur" else interval
+        agg_dict = {
+            interval: "first",
+            "vanaf": "min",
+            "tot": "max",
+            "consumption": "sum",
+            "production": "sum",
+            "cost": "sum",
+            "profit": "sum",
+            "datasoort": get_datasoort,
+            "slot": "first",
+        }
+        del agg_dict[group_column]
+        fi_df = fi_df.groupby([group_column], as_index=False).agg(agg_dict)
+        return fi_df[columns]
 
     def aggregate_balance_df(self, df: pd.DataFrame, interval: str):
         df = df.rename(columns={"tijd": "vanaf"})
@@ -1547,7 +1589,9 @@ class Report(DaBase):
             get_interval: str | None = None,
             column: str | None = None,
     ) -> pd.DataFrame:
-        result = pd.DataFrame(columns=[rep_interval, "tijd", "tot", "datasoort"])
+        result = pd.DataFrame(
+            columns=[rep_interval, "tijd", "tot", "datasoort", "slot"]
+        )
         moment = vanaf
         now = datetime.datetime.now()
         now = datetime.datetime(now.year, now.month, now.day, now.hour)
@@ -1568,13 +1612,24 @@ class Report(DaBase):
             else:  # maand
                 tijd_str = moment_str[0:7]  # jaar maand
             if step_interval == "uur":
-                moment = moment + datetime.timedelta(hours=1)
+                # in utc, zodat het dubbele uur bij de overgang naar wintertijd
+                # twee rijen krijgt en het ontbrekende uur in maart geen
+                slot = int(moment.timestamp())
+                moment = datetime.datetime.fromtimestamp(slot + 3600)
             elif step_interval == "dag":
+                slot = None
                 moment = moment + datetime.timedelta(days=1)
             else:  # "maand":
+                slot = None
                 moment = old_moment + relativedelta(months=1)
             datasoort = "recorded" if moment <= now else "expected"
-            result.loc[result.shape[0]] = [tijd_str, old_moment, moment, datasoort]
+            result.loc[result.shape[0]] = [
+                tijd_str,
+                old_moment,
+                moment,
+                datasoort,
+                slot,
+            ]
         result.index = pd.to_datetime(result["tijd"])
         if column is not None:
             result[column] = 0.0
@@ -1627,11 +1682,10 @@ class Report(DaBase):
         elif interval == "dag":
             column = self.db_da.day(t1.c.time).label("dag")
         else:  # interval == "uur"
-            if interval == periode_d["interval"]:
-                column = self.db_da.hour(t1.c.time).label("uur")
-            else:
-                column = self.db_da.from_unixtime(t1.c.time).label("tijd")
-                groupby_str = "tijd"
+            # per uur in utc: de lokale kloktijd is bij de overgang naar
+            # wintertijd voor twee uren gelijk
+            column = self.db_da.hour_slot(t1.c.time).label("slot")
+            groupby_str = "slot"
         if field is not None and col_dict[field]["sensors"] == "calc":
             field = None
         last_moment = vanaf
@@ -1694,6 +1748,7 @@ class Report(DaBase):
                     )
                 )
                 .group_by(groupby_str)
+                .order_by(groupby_str)
             )
 
             with self.db_da.engine.connect() as connection:
@@ -1824,7 +1879,7 @@ class Report(DaBase):
                 """
                 query = (
                     select(
-                        self.db_da.hour_start(p1.c.time).label("uur"),
+                        self.db_da.hour_slot(p1.c.time).label("slot"),
                         func.min(self.db_da.from_unixtime(p1.c.time)).label("tijd"),
                         func.sum(p1.c.value).label(key),
                     )
@@ -1842,7 +1897,8 @@ class Report(DaBase):
                             ),
                         )
                     )
-                    .group_by("uur")
+                    .group_by("slot")
+                    .order_by("slot")
                 )
 
                 with self.db_da.engine.connect() as connection:
@@ -1894,8 +1950,6 @@ class Report(DaBase):
         )
         # Aliases for the variabel table
         v1 = variabel_table.alias("v1")
-        column = self.db_da.hour(t1.c.time).label("uur")
-        column2 = func.min(self.db_da.from_unixtime(t1.c.time)).label("tijd")
         if rep_interval == "maand":
             column = self.db_da.month(t1.c.time).label("maand")
             column2 = func.min(self.db_da.month_start(t1.c.time)).label("tijd")
@@ -1906,9 +1960,11 @@ class Report(DaBase):
             column = self.db_da.hour(t1.c.time).label("uur")
             column2 = func.min(self.db_da.hour_start(t1.c.time)).label("tijd")
 
-        if get_interval == "uur" and rep_interval != "uur":
-            column = self.db_da.hour_start(t1.c.time).label("uur")
-            groupby_str = "uur"
+        if rep_interval == "uur" or get_interval == "uur":
+            # per uur in utc: de lokale kloktijd is bij de overgang naar
+            # wintertijd voor twee uren gelijk
+            column = self.db_da.hour_slot(t1.c.time).label("slot")
+            groupby_str = "slot"
         else:
             groupby_str = rep_interval
 
@@ -1931,6 +1987,7 @@ class Report(DaBase):
                 )
             )
             .group_by(groupby_str)
+            .order_by(groupby_str)
         )
 
         with self.db_da.engine.connect() as connection:
@@ -2012,6 +2069,10 @@ class Report(DaBase):
             elif calc_dict["series"][key]["source"] == "prices":
                 if key not in result.columns:
                     df_prices = self.get_price_data(vanaf, tot)
+                    if self._slot_positions(df_prices, result) is not None:
+                        result = self.copy_col_df(df_prices, result, "da_cons")
+                        result = self.copy_col_df(df_prices, result, "da_prod")
+                        continue
                     df_prices.reset_index(drop=True, inplace=True)
                     result.reset_index(drop=True, inplace=True)
                     # df_prices.rename(columns={'time': 'tijd'}, inplace=True)
@@ -2069,12 +2130,19 @@ class Report(DaBase):
             interval = _interval if _interval else periode_d["interval"]
 
         source = _source
+        group_column = interval
         if interval == "maand":
-            column = self.db_da.month(t1.c.time).label("maand")
+            columns = [self.db_da.month(t1.c.time).label("maand")]
         elif interval == "dag":
-            column = self.db_da.day(t1.c.time).label("dag")
+            columns = [self.db_da.day(t1.c.time).label("dag")]
         else:  # interval == "uur"
-            column = self.db_da.hour(t1.c.time).label("uur")
+            # per uur in utc: de lokale kloktijd is bij de overgang naar
+            # wintertijd voor twee uren gelijk
+            columns = [
+                func.min(self.db_da.hour(t1.c.time)).label("uur"),
+                self.db_da.hour_slot(t1.c.time).label("slot"),
+            ]
+            group_column = "slot"
         result = None
         if source == "all" or source == "da":
             for cat, label in [
@@ -2085,7 +2153,7 @@ class Report(DaBase):
             ]:
                 query = (
                     select(
-                        column,
+                        *columns,
                         func.min(self.db_da.from_unixtime(t1.c.time)).label("vanaf"),
                         func.max(self.db_da.from_unixtime(t1.c.time)).label("tot"),
                         func.sum(t1.c.value).label(label),
@@ -2104,16 +2172,15 @@ class Report(DaBase):
                             ),
                         )
                     )
-                    .group_by(interval)
+                    .group_by(group_column)
+                    .order_by(group_column)
                 )
 
                 with self.db_da.engine.connect() as connection:
                     query_str = str(query.compile(connection))
                     logging.debug(f"Query: \n {query_str}")
                     result_cat = pd.read_sql_query(query, connection)
-                result_cat.index = result_cat[
-                    interval
-                ]  # pd.to_datetime(result_cat["vanaf"])
+                result_cat.index = result_cat[group_column]
                 if result is None:
                     result = result_cat
                 else:
@@ -2226,6 +2293,7 @@ class Report(DaBase):
                     p1.c.value.label("consumption"),
                     p2.c.value.label("production"),
                     literal("expected").label("datasoort"),
+                    p1.c.time.label("slot"),
                 ).where(
                     and_(
                         p1.c.time == p2.c.time,
@@ -2242,7 +2310,7 @@ class Report(DaBase):
                             tot.strftime("%Y-%m-%d %H:%M:%S")
                         ),
                     )
-                )
+                ).order_by(p1.c.time)
 
                 with self.db_da.engine.connect() as connection:
                     query_str = str(query.compile(connection))
@@ -2636,6 +2704,8 @@ class Report(DaBase):
         report_df = report_df.drop("tijd", axis=1)
         report_df = report_df.drop("tot", axis=1)
         report_df = report_df.drop("datasoort", axis=1)
+        if "slot" in report_df.columns:
+            report_df = report_df.drop("slot", axis=1)
         if "datasoort" in report_df.columns:
             report_df = report_df.drop("datasoort", axis=1)
         key_columns = report_df.columns.values.tolist()[1:]
@@ -3070,7 +3140,7 @@ class Report(DaBase):
         btw_t = 0
         multiplier_l = 1
         multiplier_t = 1
-        columns = ["time", "da_ex", "da_cons", "da_prod", "datasoort"]
+        columns = ["time", "da_ex", "da_cons", "da_prod", "datasoort", "slot"]
         df = pd.DataFrame(columns=columns)
         salderen = self.prices_options.tax_refund if self.prices_options else True
         for row in df_da.itertuples():
@@ -3094,35 +3164,38 @@ class Report(DaBase):
                 )
             else:
                 da_prod = (row.value + ol_t) * (1 + btw_t / 100)
+            utc = getattr(row, "utc", None)
+            if pd.isna(utc):
+                slot = None
+            elif interval == "1hour":
+                slot = int(utc) - int(utc) % 3600
+            else:
+                slot = int(utc)
             df.loc[df.shape[0]] = [
                 datetime.datetime.strptime(row.time, "%Y-%m-%d %H:%M"),
                 row.value,
                 da_cons,
                 da_prod,
                 "expected",
+                slot,
             ]
         return df
 
     def calc_solar_data(self, device, day: datetime.date, active_view: str):
-        result = pd.DataFrame(columns=["uur", "tijd"])
         start = datetime.datetime(day.year, day.month, day.day)
         end = start + datetime.timedelta(days=1)
-        begin = dati = datetime.datetime(start.year, start.month, start.day, hour=0)
-        hour_int = 0
-        while dati < end:
-            hour_int += 1
-            hour_str = dati.strftime("%H:%M")
-            result.loc[result.shape[0]] = [hour_str, dati]
-            dati = begin + datetime.timedelta(hours=hour_int)
-        result.index = pd.to_datetime(result["tijd"])
+        result = self.generate_df(start, end, "uur")[["tijd", "slot"]]
+        result.insert(0, "uur", result["tijd"].dt.strftime("%H:%M"))
 
         # prognose straling
         rad_prog = self.get_da_data("gr", start, end, "uur", "uur", "prognoses")
-        result["prognose_straling"] = rad_prog["gr"]
+        result["prognose_straling"] = pd.NA
+        self.add_col_df(rad_prog, result, "gr", "prognose_straling")
 
         # gemeten straling
         rad_real = self.get_da_data("gr", start, end, "uur", "uur", "values")
-        result["gemeten_straling"] = rad_real["gr"]
+        result["gemeten_straling"] = pd.NA
+        self.add_col_df(rad_real, result, "gr", "gemeten_straling")
 
         # gemeten productie
         sensors = device.entities_sensors
@@ -3163,6 +3236,9 @@ class Report(DaBase):
             device, start, end, interval="1hour", _ml_prediction=True
         )
         if "date_time" in solar_prog.columns:
+            solar_prog["slot"] = solar_prog["date_time"].map(
+                lambda moment: int(moment.timestamp())
+            )
             solar_prog["tijd"] = solar_prog["date_time"].dt.tz_localize(None)
         solar_prog.index = solar_prog["tijd"]
         result["prognose_ml"] = pd.NA
@@ -3285,12 +3361,34 @@ class Report(DaBase):
                 columns={"prediction": field, "date_time": "time"}
             )
         df_result["time"] = df_result["tijd"]
+        if len(df_result) > 0 and df_result["tijd"].dt.tz is not None:
+            df_result["slot"] = df_result["tijd"].map(
+                lambda moment: int(moment.timestamp())
+            )
         df_result["datasoort"] = "expected"
         # df_result["time_ts"] = df_result["time"].apply(lambda x: int(x.timestamp()))
         df_result.drop("tijd", axis=1, inplace=True)
         df_result["time"] = df_result["time"].dt.tz_localize(None)
         df_result.index = df_result["time"]
         return df_result
+
+    def api_time_ts(self, df: pd.DataFrame) -> pd.Series:
+        """
+        Het begintijdstip van elke rij met tijdzone. Uit de utc-tijd (kolom
+        "slot" of "utc") als die er is: de lokale tijd in kolom "time" is bij
+        de overgang naar wintertijd voor twee uren gelijk.
+        """
+        local = df["time"].dt.tz_localize(
+            self.time_zone, ambiguous=True, nonexistent="shift_forward"
+        )
+        for col in ("utc", "slot"):
+            if col in df.columns:
+                utc = pd.to_numeric(df[col], errors="coerce")
+                from_utc = pd.to_datetime(utc, unit="s", utc=True).dt.tz_convert(
+                    self.time_zone
+                )
+                local = from_utc.where(utc.notna(), local)
+        return local
 
     def get_api_data(self, field: str, _periode: str, cumulate: bool = False):
         periode = _periode.replace("_", " ")
@@ -3314,13 +3412,14 @@ class Report(DaBase):
                 lambda x: pd.to_datetime(x).strftime("%Y-%m-%d %H:%M")
             )
 
+            keep = ["slot"] if "slot" in df_grid.columns else []
             if field in grid_fields:
-                df = df_grid[["time", field, "datasoort"]].copy()
+                df = df_grid[["time", field, "datasoort"] + keep].copy()
                 if cumulate:
                     df[field] = df_grid[field].cumsum()
                 df.rename({field: "value"}, axis=1, inplace=True)
             if field == "grid":
-                df = df_grid[["time", "datasoort"] + grid_fields].copy()
+                df = df_grid[["time", "datasoort"] + grid_fields + keep].copy()
                 if cumulate:
                     for field in grid_fields:
                         df[field] = df[field].cumsum()
@@ -3343,7 +3442,7 @@ class Report(DaBase):
                 periode, field=field, _tot=tot, col_dict=dict
             )
             df_balance["time"] = df_balance["tijd"]
-            df = df_balance[["time", field, "datasoort"]].copy()
+            df = df_balance[["time", field, "datasoort", "slot"]].copy()
             if periode == "vandaag en morgen" and field in ["pv_ac", "pv_dc"]:
                 vanaf = last_moment
                 tot = last_moment + datetime.timedelta(days=2)
@@ -3360,7 +3459,8 @@ class Report(DaBase):
             return result
 
         df["time"] = pd.to_datetime(df["time"])
-        df["time_ts"] = df["time"].dt.tz_localize(self.time_zone)
+        df["time_ts"] = self.api_time_ts(df)
+        df = df.drop(columns=["slot"], errors="ignore")
         df["time"] = df["time"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M"))
         df.rename(columns={"datasoort": "datatype"}, inplace=True)
         cols = df.columns.tolist()
