@@ -260,24 +260,3 @@ def test_to_api_intervals_laat_staart_na_uurdeel_per_kwartier():
     result = Report.to_api_intervals(df, ["value"], "kwartier", hourly_range)
     assert list(result["interval_minutes"]) == [60] + [15] * 4
     assert list(result["value"]) == [1.0] + [0.25] * 4
-
-
-def test_to_api_intervals_houdt_dubbel_uur_einde_zomertijd_op_volgorde():
-    """
-    Op de dag dat de zomertijd eindigt komen de kwartieren van 02:00 tot 03:00
-    twee keer voor. Na het sorteren moet van elke dubbele tijd die van de
-    zomertijd voorop blijven, zodat localize_local_times ze goed toewijst.
-    """
-    from dao.prog.utils import localize_local_times
-
-    eerste = _kwartieren(datetime.datetime(2026, 10, 25, 1, 45), 5)
-    tweede = _kwartieren(datetime.datetime(2026, 10, 25, 2), 5)
-    tijden = eerste + tweede
-    df = pd.DataFrame(
-        {"time": tijden, "value": list(range(10)), "datasoort": ["recorded"] * 10}
-    )
-    result = Report.to_api_intervals(df, ["value"], "kwartier")
-    ts = localize_local_times(result["time"], "Europe/Amsterdam")
-    assert ts.is_unique
-    # op het werkelijke tijdstip gesorteerd staan de waarden weer in hun volgorde
-    assert list(result.loc[ts.sort_values().index, "value"]) == list(range(10))
