@@ -4730,10 +4730,7 @@ class DaCalc(DaBase):
                 "prices_production": graph_option(
                     "prices production", "prices redelivery", "prices_production"
                 ),
-                "prices_spot": str(
-                    (_g.prices_spot if _g else True) or "true"
-                ).lower()
-                == "true",
+                "prices_spot": _g is None or bool(_g.prices_spot),
                 "average_consumption": graph_option(
                     "average consumption", "average delivery", "average_consumption"
                 ),
