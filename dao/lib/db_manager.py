@@ -322,6 +322,23 @@ class DBmanagerObj:
         else:  # mysql/mariadb
             return func.date_format(func.from_unixtime(column), "%Y-%m-%d %H:00")
 
+    @staticmethod
+    def hour_slot(column) -> func:
+        """
+        Het begin van het uur waarin "column" (een unix-timestamp) valt, als
+        unix-timestamp. Anders dan een lokale kloktijd is dit ook uniek voor het
+        uur dat bij de overgang naar wintertijd twee keer voorkomt.
+        """
+        return column - column % 3600
+
+    @staticmethod
+    def quarter_slot(column) -> func:
+        """
+        Het begin van het kwartier waarin "column" (een unix-timestamp) valt,
+        als unix-timestamp; zie hour_slot.
+        """
+        return column - column % 900
+
     def savedata(self, df: pd.DataFrame, tablename: str = "values"):
         """
         save data in dateframe,
