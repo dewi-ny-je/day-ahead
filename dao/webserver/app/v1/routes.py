@@ -2,20 +2,19 @@
 import collections
 import datetime
 import fnmatch
-import json
 import logging
 import os
 import re
 import threading
-import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-from subprocess import PIPE, STDOUT, Popen
+from subprocess import PIPE, STDOUT
 
 # from sqlalchemy.sql.coercions import expect_col_expression_collection
 from flask import Blueprint, jsonify, render_template, request
 from flask import session as flask_session
 
+from dao.prog import da_task_queue
 from dao.prog.config.loader import ConfigurationLoader
 from dao.prog.da_const import tasks as bewerkingen
 from dao.prog.da_report import Report
@@ -459,69 +458,23 @@ def home():
     )
 
 
-# logfile = "../data/log/run.log"
-"""
-task_state = {
-    "status": "idle",    # idle | running | done | error
-    "task" : "",
-    "msg" : "",
-    "returncode": None
-}
-"""
-lock = threading.Lock()
-
-STATEFILE = "../data/task_state.json"
-STALE_AFTER = 600
+V1_SOURCE = "gui-v1"
 
 
-def save_state(task_state):
-    task_state["last_update"] = time.time()
-    with open(STATEFILE, "w") as f:
-        json.dump(task_state, f)
+def latest_v1_job() -> dict | None:
+    """The task started from this page that is active, else the latest one."""
+    for job in da_task_queue.jobs():
+        if job["source"] == V1_SOURCE:
+            return job
+    return None
 
 
-def load_state():
-    if not os.path.exists(STATEFILE):
-        return {"status": "idle", "task": None, "logfile": None}
-    try:
-        with open(STATEFILE) as f:
-            state = json.load(f)
-
-        # 🔥 check op "stale" state
-        last = state.get("last_update", 0)
-        if (
-            (state.get("status") == "running")
-            and (time.time() - last > STALE_AFTER)
-        ):
-            # taak is waarschijnlijk dood
-            return {"status": "idle", "task": None, "logfile": None}
-        return state
-    except Exception:
-        return {"status": "idle", "task": None}
-
-
-def run_and_log(cmd, task, logfile):
-    # logfile = f"../data/log/run_{int(time.time())}.log"
-    save_state(
-        {"status": "running", "task": task, "returncode": None, "logfile": logfile}
-    )
+def pump_output(proc, logfile):
     with open(logfile, "w") as f:
-        proc = Popen(cmd, stdout=PIPE, stderr=STDOUT, cwd=PROG_DIR, text=True)
-
         for line in proc.stdout:
             f.write(line)
             f.flush()
-
-        proc.wait()
-
-    save_state(
-        {
-            "status": "done" if proc.returncode == 0 else "error",
-            "task": task,
-            "returncode": proc.returncode,
-            "logfile": logfile,
-        }
-    )
+    proc.wait()
 
 
 @app.route("/run", methods=["POST", "GET"])
@@ -532,53 +485,65 @@ def run_process():
     parameters = {}
 
     if request.method in ["POST", "GET"]:
-        task_state = load_state()
-        if task_state.get("status") == "running":
-            log_content = "Er draait al een opdracht."
+        state = "idle"
+        dct = request.form.to_dict(flat=False)
+        if "current_bewerking" in dct:
+            current_bewerking = dct["current_bewerking"][0]
+            run_bewerking = bewerkingen[current_bewerking]
+            extra_parameters = []
+            if "parameters" in run_bewerking:
+                for j in range(len(run_bewerking["parameters"])):
+                    if run_bewerking["parameters"][j] in dct:
+                        param_value = dct[run_bewerking["parameters"][j]][0]
+                        if len(param_value) > 0:
+                            extra_parameters.append(param_value)
+            logfile = (
+                "../data/log/"
+                + run_bewerking["file_name"]
+                + "_tmp_"
+                + datetime.datetime.now().strftime("%Y-%m-%d__%H:%M:%S")
+                + ".log"
+            )
+
+            cmd = run_bewerking["cmd"] + extra_parameters
+            bewerking = ""
+            proc, _job_id, entry = da_task_queue.spawn(
+                cmd, source=V1_SOURCE, cwd=PROG_DIR,
+                console_log=os.path.abspath(logfile),
+                stdout=PIPE, stderr=STDOUT, text=True,
+            )
+            threading.Thread(
+                target=pump_output, args=(proc, logfile), daemon=True
+            ).start()
+            if entry is None:
+                log_content = "Opdracht kon niet worden gestart"
+            elif entry["state"] == da_task_queue.QUEUED and entry.get("position"):
+                log_content = (
+                    f"Opdracht staat in de wachtrij (plaats {entry['position']})"
+                )
+            elif entry["state"] == da_task_queue.JOINED:
+                log_content = (
+                    "Deze opdracht draait al of staat al in de wachtrij; "
+                    "het resultaat daarvan wordt getoond"
+                )
+            else:
+                log_content = "Opdracht is gestart"
             state = "running"
         else:
-            dct = request.form.to_dict(flat=False)
-            if "current_bewerking" in dct:
-                current_bewerking = dct["current_bewerking"][0]
-                run_bewerking = bewerkingen[current_bewerking]
-                extra_parameters = []
-                if "parameters" in run_bewerking:
-                    for j in range(len(run_bewerking["parameters"])):
-                        if run_bewerking["parameters"][j] in dct:
-                            param_value = dct[run_bewerking["parameters"][j]][0]
-                            if len(param_value) > 0:
-                                extra_parameters.append(param_value)
-                logfile = (
-                    "../data/log/"
-                    + run_bewerking["file_name"]
-                    + "_tmp_"
-                    + datetime.datetime.now().strftime("%Y-%m-%d__%H:%M:%S")
-                    + ".log"
-                )
-
-                cmd = run_bewerking["cmd"] + extra_parameters
-                bewerking = ""
-                task = current_bewerking
-                threading.Thread(
-                    target=run_and_log, args=(cmd, task, logfile), daemon=True
-                ).start()
-                log_content = "Opdracht is gestart"
-                state = "running"
-            else:
-                for i in range(len(dct.keys())):
-                    bew = list(dct.keys())[i]
-                    if bew in bewerkingen:
-                        bewerking = bew
-                        if "parameters" in bewerkingen[bewerking]:
-                            for j in range(len(bewerkingen[bewerking]["parameters"])):
-                                if bewerkingen[bewerking]["parameters"][j] in dct:
-                                    param_str = bewerkingen[bewerking]["parameters"][j]
-                                    param_value = dct[
-                                        bewerkingen[bewerking]["parameters"][j]
-                                    ][0]
-                                    parameters[param_str] = param_value
-                        break
-                state = "idle"
+            for i in range(len(dct.keys())):
+                bew = list(dct.keys())[i]
+                if bew in bewerkingen:
+                    bewerking = bew
+                    if "parameters" in bewerkingen[bewerking]:
+                        for j in range(len(bewerkingen[bewerking]["parameters"])):
+                            if bewerkingen[bewerking]["parameters"][j] in dct:
+                                param_str = bewerkingen[bewerking]["parameters"][j]
+                                param_value = dct[
+                                    bewerkingen[bewerking]["parameters"][j]
+                                ][0]
+                                parameters[param_str] = param_value
+                    break
+            state = "idle"
 
     return render_template(
         "v1/run.html",
@@ -595,38 +560,42 @@ def run_process():
     )
 
 
+V1_MESSAGES = {
+    da_task_queue.RUNNING: "Opdracht '{name}' wordt uitgevoerd",
+    da_task_queue.QUEUED: "Opdracht '{name}' staat in de wachtrij (plaats {position})",
+    da_task_queue.JOINED: "Opdracht '{name}' wacht op dezelfde opdracht die al loopt",
+    da_task_queue.DONE: "✅ Opdracht '{name}' succesvol afgerond",
+    da_task_queue.ERROR: "❌ Opdracht '{name}' geëindigd met fout",
+    da_task_queue.TIMEOUT: "❌ Opdracht '{name}' gestopt: duurde te lang",
+    da_task_queue.SUPERSEDED: "Opdracht '{name}' vervangen door een nieuwere aanvraag",
+    da_task_queue.CANCELLED: "Opdracht '{name}' geannuleerd",
+}
+
+
 @app.route("/status")
 def status():
-    task_state = load_state()
-    task = task_state.get("task")
-    if task in bewerkingen:
-        task_name = bewerkingen[task]["name"]
-    else:
-        task_name = task
-    state = task_state.get("status")
-    msg = task_state.get("msg")
-    task_state["msg"] = ""
-    if state == "running":
-        msg = f"Opdracht '{task_name}' wordt uitgevoerd"
-    elif state == "done":
-        msg = f"✅ Opdracht '{task_name}' succesvol afgerond"
-    elif state == "error":
-        msg = f"❌ Opdracht '{task_name}' geëindigd met fout"
-    else:
-        msg = f"Opdracht '{task}' : {state}"
+    job = latest_v1_job()
+    if job is None:
+        return jsonify({"status": "idle", "msg": "Nog geen opdracht uitgevoerd"})
+    task = job["task"]
+    task_name = bewerkingen[task]["name"] if task in bewerkingen else task
+    msg = V1_MESSAGES[job["state"]].format(name=task_name, position=job.get("position"))
+    # the page keeps polling as long as the task is not finished
+    state = "running" if job["state"] in da_task_queue.ACTIVE_STATES else job["state"]
     return jsonify({"status": state, "msg": msg})
 
 
 @app.route("/log")
 def show_log():
-    task_state = load_state()
-    logfile = task_state.get("logfile", None)
+    job = latest_v1_job()
+    logfile = None
+    if job is not None:
+        logfile = job.get("console_log") or job.get("logfile")
     if logfile is None or not os.path.exists(logfile):
         return "Nog geen log beschikbaar"
     with open(logfile) as f:
         lines = f.readlines()
-    state = task_state["status"]
-    if state == "running":
+    if job["state"] in da_task_queue.ACTIVE_STATES:
         text = "".join(lines[-20:])  # laatste 20 regels
     else:
         text = "".join(lines)
