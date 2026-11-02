@@ -36,7 +36,7 @@ test('boosted task submission polls and swaps status without navigation', async 
   expect(new URLSearchParams(request.postData()).get('task')).toBe('complete')
   await expect(page.locator('#status-target h2')).toContainText('running')
   await expect(page.locator('#run-cancel')).not.toHaveClass(/disabled/)
-  await expect(page.locator('#status-target h2')).toContainText('completed', { timeout: 10_000 })
+  await expect(page.locator('#status-target h2')).toContainText('done', { timeout: 10_000 })
   await expect(page.locator('#run-cancel')).toHaveClass(/disabled/)
   expect(statusRequests).toBeGreaterThanOrEqual(3)
   expect(page.url()).toBe(initialURL)
