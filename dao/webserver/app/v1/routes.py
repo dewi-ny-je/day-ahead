@@ -462,11 +462,9 @@ V1_SOURCE = "gui-v1"
 
 
 def latest_v1_job() -> dict | None:
-    """The task started from this page that is active, else the latest one."""
-    for job in da_task_queue.jobs():
-        if job["source"] == V1_SOURCE:
-            return job
-    return None
+    """The task most recently started from this page."""
+    jobs = [j for j in da_task_queue.jobs() if j.get("source") == V1_SOURCE]
+    return max(jobs, key=lambda j: j.get("enrolled") or 0, default=None)
 
 
 def pump_output(proc, logfile):

@@ -1,8 +1,7 @@
 import os
 from datetime import datetime
 from pathlib import Path
-from subprocess import DEVNULL
-from subprocess import run as subprocess_run
+from subprocess import DEVNULL, PIPE
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Blueprint, current_app, request
@@ -69,7 +68,6 @@ def run_api(task: str):
         )
 
     cmd = tasks[matched_task]["cmd"]
-    job_id = da_task_queue.new_job_id()
 
     if request.args.get("wait") == "0":
         # start the task and answer at once with its place in the queue
@@ -85,15 +83,10 @@ def run_api(task: str):
             "position": entry.get("position"),
         }, 202
 
-    proc = subprocess_run(
-        cmd,
-        cwd=PROG_DIR,
-        capture_output=True,
-        text=True,
-        env=da_task_queue.job_env(job_id, "api"),
+    proc, job_id, _entry = da_task_queue.spawn(
+        cmd, source="api", cwd=PROG_DIR, stdout=PIPE, stderr=PIPE, text=True
     )
-    data = proc.stdout
-    err = proc.stderr
+    data, err = proc.communicate()
     log_content = data + err
     filename = (
             "../data/log/"

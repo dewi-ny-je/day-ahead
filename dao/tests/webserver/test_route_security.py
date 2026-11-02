@@ -3,8 +3,9 @@ import importlib
 import json
 import logging
 from copy import deepcopy
+from subprocess import PIPE
 from types import SimpleNamespace
-from unittest.mock import ANY, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
@@ -84,23 +85,21 @@ def test_api_task_and_aliases_execute_exactly_once(client, monkeypatch, tmp_path
     monkeypatch.chdir(program_dir)
     monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", False)
     monkeypatch.setattr(api_routes, "PROG_DIR", program_dir)
-    monkeypatch.setenv(da_task_queue.ENV_QUEUE_DIR, str(tmp_path / "queue"))
-    runner = Mock(return_value=SimpleNamespace(stdout="task output\n", stderr="task warning\n",
-                                               returncode=0))
-    monkeypatch.setattr(api_routes, "subprocess_run", runner)
+    proc = Mock(returncode=0)
+    proc.communicate.return_value = ("task output\n", "task warning\n")
+    spawn = Mock(return_value=(proc, "job1", {"state": "running"}))
+    monkeypatch.setattr(da_task_queue, "spawn", spawn)
+    monkeypatch.setattr(da_task_queue, "final_state", Mock(return_value="done"))
 
     response = client.open(f"/api/run/{task}", method=method)
 
     assert response.status_code == 200
     assert response.mimetype == "text/plain"
     assert response.data == b"task output\ntask warning\n"
-    runner.assert_called_once_with(
-        api_routes.tasks["calc_optimum"]["cmd"], cwd=program_dir, capture_output=True, text=True,
-        env=ANY,
+    spawn.assert_called_once_with(
+        api_routes.tasks["calc_optimum"]["cmd"], source="api", cwd=program_dir,
+        stdout=PIPE, stderr=PIPE, text=True,
     )
-    env = runner.call_args.kwargs["env"]
-    assert env[da_task_queue.ENV_JOB_SOURCE] == "api"
-    assert env[da_task_queue.ENV_JOB_ID]
     logs = list(log_dir.glob("calc_*.log"))
     assert len(logs) == 1
     assert logs[0].read_text() == "task output\ntask warning\n"
@@ -109,7 +108,7 @@ def test_api_task_and_aliases_execute_exactly_once(client, monkeypatch, tmp_path
 @pytest.mark.parametrize("method", ["GET", "POST"])
 def test_unknown_task_is_escaped_plain_text(client, monkeypatch, method):
     runner = Mock(side_effect=AssertionError("Unknown task must not execute a command"))
-    monkeypatch.setattr(api_routes, "subprocess_run", runner)
+    monkeypatch.setattr(da_task_queue, "spawn", runner)
     response = client.open("/api/run/%3Cimg%20src=x%20onerror=alert(1)%3E", method=method)
     assert response.status_code == 400
     assert response.mimetype == "text/plain"
@@ -178,7 +177,6 @@ def test_bad_data_dates_are_client_errors(client, query):
 def test_preview_blocks_live_tasks_and_shared_state(client, monkeypatch, method, path, data):
     monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", True)
     live_calls = [
-        (api_routes, "subprocess_run"),
         (da_task_queue, "spawn"),
         (da_task_queue, "jobs"),
         (da_task_queue, "cancel"),
@@ -203,8 +201,9 @@ def _run_api(client, monkeypatch, tmp_path, final_state, returncode=0, query="")
     monkeypatch.chdir(program_dir)
     monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", False)
     monkeypatch.setattr(api_routes, "PROG_DIR", program_dir)
-    runner = Mock(return_value=SimpleNamespace(stdout="out", stderr="", returncode=returncode))
-    monkeypatch.setattr(api_routes, "subprocess_run", runner)
+    proc = Mock(returncode=returncode)
+    proc.communicate.return_value = ("out", "")
+    monkeypatch.setattr(da_task_queue, "spawn", Mock(return_value=(proc, "job1", None)))
     monkeypatch.setattr(da_task_queue, "final_state", Mock(return_value=final_state))
     return client.get("/api/run/calc" + query)
 
@@ -228,9 +227,6 @@ def test_api_without_wait_answers_with_the_queue_position(client, monkeypatch):
     monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", False)
     spawn = Mock(return_value=(Mock(), "abc123", {"state": "queued", "position": 2}))
     monkeypatch.setattr(da_task_queue, "spawn", spawn)
-    runner = Mock(side_effect=AssertionError("wait=0 must not run the task synchronously"))
-    monkeypatch.setattr(api_routes, "subprocess_run", runner)
-
     response = client.post("/api/run/calc?wait=0")
 
     assert response.status_code == 202
@@ -289,3 +285,21 @@ def test_v1_status_reports_the_queue_state(client, monkeypatch, tmp_path, state,
 
     assert response["status"] == status
     assert msg in response["msg"]
+
+
+def test_joined_request_shows_the_log_of_the_run_it_waits_for(client, monkeypatch, tmp_path):
+    monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", False)
+    monkeypatch.setenv(da_task_queue.ENV_QUEUE_DIR, str(tmp_path))
+    monkeypatch.setattr(v2_routes, "vite_tags", lambda entry: "")
+    log = tmp_path / "meteo.log"
+    log.write_text("meteo log line")
+    running = da_task_queue.enrol("get_meteo_data", [], job_id="meteo1")
+    da_task_queue.wait_turn(running["id"], poll=0.01)
+    monkeypatch.setattr(da_task_queue, "_current_job_id", "meteo1")
+    da_task_queue.record_logfile(str(log))
+    da_task_queue.enrol("get_meteo_data", [], job_id="meteo2", source="gui")
+
+    page = client.get("/v2/task-state?job=meteo2").get_data(as_text=True)
+
+    assert "joined" in page
+    assert "meteo log line" in page

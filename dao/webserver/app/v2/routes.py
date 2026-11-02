@@ -286,12 +286,17 @@ def task_exec():
     return redirect(url_for('v2.task_state', job=job_id))
 
 
-def _job_content(job: dict | None) -> str:
+def _job_content(job: dict | None, jobs: list[dict]) -> str:
     if job is None:
         return "No task has run yet"
-    if job.get("logfile"):
+    logfile = job.get("logfile")
+    if not logfile and job.get("joined_to"):
+        # a joined request shows the log of the run it waits for
+        target = next((j for j in jobs if j["id"] == job["joined_to"]), None)
+        logfile = target.get("logfile") if target else None
+    if logfile:
         try:
-            with open(job["logfile"]) as f:
+            with open(logfile) as f:
                 return f.read()
         except (OSError, UnicodeError):
             return "Could not read logfile"
@@ -330,7 +335,7 @@ def task_state():
         running=any(j["state"] == da_task_queue.RUNNING for j in active),
         started=started,
         seconds_running=seconds_running,
-        content=_job_content(job),
+        content=_job_content(job, jobs),
     ), headers
 
 

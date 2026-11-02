@@ -21,6 +21,7 @@ WORKER = textwrap.dedent(
     from dao.prog import da_task_queue as q
 
     task, policy, duration, marker, protect = sys.argv[1:6]
+    code = int(sys.argv[6]) if len(sys.argv) > 6 else 0
     task_def = {{"on_duplicate": policy}}
     job_id = q.run_gate(task, [], task_def)
     with open(marker, "a") as f:
@@ -30,8 +31,8 @@ WORKER = textwrap.dedent(
     time.sleep(float(duration))
     with open(marker, "a") as f:
         f.write(f"end {{task}} {{job_id}} {{time.time()}}\\n")
-    q.finish(job_id, 0)
-    sys.exit(0)
+    q.finish(job_id, code)
+    sys.exit(code)
     """
 )
 
@@ -45,9 +46,9 @@ def queue(tmp_path, monkeypatch):
     marker.touch()
     procs = []
 
-    def start(task, policy="join", duration=0.0, protect=False):
+    def start(task, policy="join", duration=0.0, protect=False, code=0):
         cmd = [sys.executable, str(worker), task, policy, str(duration), str(marker),
-               "1" if protect else "0"]
+               "1" if protect else "0", str(code)]
         proc, job_id, entry = q.spawn(cmd, source="test", stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, text=True)
         assert entry is not None, proc.communicate()[0]
@@ -145,6 +146,45 @@ def test_join_waits_for_the_existing_run_and_takes_its_result(queue):
     assert "wacht op het resultaat" in out
     assert q.final_state(id_joined) == q.DONE
     assert [e for e in events() if e[0] == "start"] == [["start", "train", id_first]]
+
+
+def test_join_reports_the_failure_of_the_existing_run(queue):
+    start, _events, _wait_for = queue
+    first, id_first = start("train", duration=1, code=1)
+    joined, id_joined = start("train")
+    _finish_all(first, joined)
+
+    assert first.returncode == 1
+    assert joined.returncode == 1
+    assert q.final_state(id_first) == q.ERROR
+    assert q.final_state(id_joined) == q.ERROR
+
+
+def test_history_keeps_the_entry_a_joined_request_waits_for(tmp_path, monkeypatch):
+    monkeypatch.setenv(q.ENV_QUEUE_DIR, str(tmp_path))
+    awaited = {"id": "target", "key": "x", "task": "x", "pid": 1, "state": "done",
+               "finished": 0.0, "exit_code": 0}
+    newer = [{"id": f"j{i}", "key": "y", "task": "y", "pid": 1, "state": "done",
+              "finished": float(i + 1)} for i in range(q.HISTORY_SIZE + 5)]
+    joined = {"id": "joiner", "key": "x", "task": "x", "pid": 1, "state": "joined",
+              "joined_to": "target"}
+    (tmp_path / "task_queue.json").write_text(json.dumps({"jobs": [awaited, *newer, joined]}))
+    monkeypatch.setattr(q, "_alive", lambda entry: True)
+
+    assert q.wait_turn("joiner", poll=0.01)["state"] == q.DONE
+
+
+def test_queue_dir_becomes_the_add_on_data_link(tmp_path, monkeypatch):
+    monkeypatch.delenv(q.ENV_QUEUE_DIR, raising=False)
+    ha_data = tmp_path / "config" / "dao_data"
+    ha_data.mkdir(parents=True)
+    monkeypatch.setattr(q, "HA_DATA_DIR", str(ha_data))
+    data = tmp_path / "dao" / "data"
+    data.parent.mkdir()
+
+    q._ensure_dir(data)
+
+    assert data.is_symlink() and data.resolve() == ha_data.resolve()
 
 
 def test_stop_during_protected_output_lets_the_task_finish(queue):

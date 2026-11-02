@@ -14,6 +14,12 @@ task's ``on_duplicate`` policy:
 * ``join``: the new request starts nothing. It waits for the existing entry
   and ends with that entry's result.
 
+A task that is stopped while it runs ends by the signal itself (SIGTERM
+for a stop request, SIGALRM after TASK_TIMEOUT), so it stops at once, also
+inside the solver; its exit status is then the signal's. Its final state
+(superseded, cancelled, timeout) is in its queue entry. Exit codes 3 and 4
+belong to requests that end before their run starts.
+
 The queue is a JSON file next to ``options.json``, read and written under an
 exclusive ``flock``. Every entry stores the PID of its process, and an
 entry whose process has gone is settled the next time anyone opens the
@@ -153,11 +159,32 @@ def _alive(entry: dict) -> bool:
     return recorded in (None, "?") or start == "?" or start == recorded
 
 
+HA_DATA_DIR = "/config/dao_data"
+
+
+def _ensure_dir(directory: Path):
+    """Create the queue directory.
+
+    As a Home Assistant add-on the data directory is a link to
+    /config/dao_data, which DaBase.make_data_path() creates when it is
+    missing. The queue is opened before that, so it makes the same link
+    instead of a plain directory that would stand in its way.
+    """
+    if (
+        not os.path.lexists(directory)
+        and ENV_QUEUE_DIR not in os.environ
+        and os.path.isdir(HA_DATA_DIR)
+    ):
+        with contextlib.suppress(FileExistsError):
+            os.symlink(HA_DATA_DIR, directory)
+    directory.mkdir(parents=True, exist_ok=True)
+
+
 @contextlib.contextmanager
 def _locked():
     """The queue state, read and written back under an exclusive lock."""
     directory = queue_dir()
-    directory.mkdir(parents=True, exist_ok=True)
+    _ensure_dir(directory)
     with open(_lock_file(), "a+") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         try:
@@ -205,7 +232,9 @@ def _settle_dead(jobs: list[dict], now: float):
 
 def _trim_history(state: dict):
     jobs = state["jobs"]
-    finished = [j for j in jobs if j["state"] in FINISHED_STATES]
+    # a joined entry still needs the result of the entry it waits for
+    awaited = {j.get("joined_to") for j in jobs if j["state"] == JOINED}
+    finished = [j for j in jobs if j["state"] in FINISHED_STATES and j["id"] not in awaited]
     if len(finished) <= HISTORY_SIZE:
         return
     finished.sort(key=lambda j: j.get("finished") or 0)
@@ -332,6 +361,8 @@ def wait_turn(job_id: str, poll: float = POLL_INTERVAL) -> dict:
                     final = target["state"] if target is not None else ERROR
                     _finish_entry(entry, final, time.time(),
                                   target.get("exit_code") if target else None)
+                    if target is not None:
+                        entry["logfile"] = target.get("logfile")
                     result = dict(entry)
                     result["target"] = dict(target) if target else None
                     return result
