@@ -472,7 +472,11 @@ class Meteo:
 
     def price_prediction_enabled(self) -> bool:
         prices = getattr(self.config, "prices", None)
-        return prices is not None and prices.prediction.extension > 0
+        return (
+            prices is not None
+            and prices.prediction is not None
+            and (prices.prediction.extension or 0) > 0
+        )
 
     def try_get_from_meteoserver(self, model: str) -> pd.DataFrame:
         # een fout bij het ene model mag de data van het andere niet kosten
@@ -487,7 +491,8 @@ class Meteo:
         :return: utc timestamp van het einde van de planningshorizon: het einde
         van de bekende day-ahead prijzen plus de verlenging met voorspelde prijzen
         """
-        extension = self.config.prices.prediction.extension
+        prediction = self.config.prices.prediction
+        extension = (prediction.extension if prediction else 0) or 0
         known_at = self.db_da.get_time_border_record("da")
         if known_at is None:
             start = datetime.datetime.now().timestamp()
