@@ -794,5 +794,5 @@ def view_file():
     return render_template(
         "v2/view-file.html",
         content=content,
-        filename=log_file,
+        filename=log_file.name,
     )
