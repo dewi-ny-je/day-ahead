@@ -40,6 +40,12 @@ class DaPrices:
         else:
             resolution = 15
         now = datetime.datetime.now()
+        # de scheduler start taken tot 60 s te vroeg: binnen 60 s voor een heel
+        # uur geldt dat uur als het tijdstip van de taak
+        if (60 - now.minute) * 60 - now.second <= 60:
+            now = now.replace(minute=0, second=0, microsecond=0) + datetime.timedelta(
+                hours=1
+            )
         # start
         if _start is None:
             start = pd.Timestamp(year=now.year, month=now.month, day=now.day, tz="CET")
