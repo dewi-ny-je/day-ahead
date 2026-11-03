@@ -21,7 +21,6 @@ venv/
 .ruff_cache/
 .pytest_cache/
 dao/data/options_unversioned.json
-dao/pred/data/da_prediction.pkl
 dao/data/options_new.json
 
 /dao/data/task_state.json
@@ -33,3 +32,5 @@ dao/webserver/app/static/build
 .DS_Store
 
 /.local/
+/.env
+scripts/convert_db.sh

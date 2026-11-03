@@ -2492,6 +2492,15 @@ class Report(DaBase):
                         df_prices = pd.concat([df_prices, df_prog_prices])
 
             df_prices.rename(columns={"time": "tijd"}, inplace=True)
+            """
+            df_prices = df_prices.groupby(["tijd"], as_index=False).agg(
+                {
+                    "da_ex": "mean",
+                    "da_cons": "mean",
+                    "da_prod": "mean",
+                }
+            )
+            """
             df_prices.index = pd.to_datetime(df_prices["tijd"])
             df_ha = self.copy_col_df(df_prices, df_ha, "da_cons")
             df_ha = self.copy_col_df(df_prices, df_ha, "da_prod")
@@ -3331,7 +3340,7 @@ class Report(DaBase):
                         1 + btw_t / 100
                 )
             else:
-                da_prod = (row.value + ol_t) * (1 + btw_t / 100)
+                da_prod = (row.value * multiplier_t + ol_t) * (1 + btw_t / 100)
             if bonus is not None:
                 da_prod += self._production_bonus_price(
                     row_ts[index], durations[index], row.value, ol_t
@@ -3644,7 +3653,7 @@ class Report(DaBase):
                 lambda moment: int(moment.timestamp())
             )
         df_result["datasoort"] = "expected"
-        # df_result["time_ts"] = df_result["time"].apply(lambda x: int(x.timestamp()))
+        df_result["time_ts"] = df_result["time"].apply(lambda x: int(x.timestamp()))
         df_result.drop("tijd", axis=1, inplace=True)
         df_result["time"] = df_result["time"].dt.tz_localize(None)
         df_result.index = df_result["time"]
