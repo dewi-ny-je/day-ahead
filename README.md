@@ -43,10 +43,11 @@ The branch `dev` follows upstream `main` and carries everything listed below.
 | Baseload of the first interval | A run that starts partway through an interval scales the first interval's baseload in the unoptimised reference, the "Overig verbr." bar, "Cost before optimize" and the logged prognoses table, as the optimisation already did. |
 | Hourly prediction tail at `15min` | With `interval: 15min` and price prediction, each hourly step of the predicted tail counts as an hour, not a quarter, for boiler cooling, heating and consumption, EV charging time, heat pump hours and run blocks, and machine runs; quarter hours in the tail are assigned to the hour they fall in. |
 | `prices_spot: false` | The calculation PNG no longer draws the spot price line when it is disabled. |
+| Prices task before a whole hour | A prices task that the scheduler starts a few seconds before its whole hour fetches the range of that hour, so the 12:00 run also asks for tomorrow's prices and the 00:00 run starts on the new day. |
 | Task exit codes | A failed optimisation or price prediction exits with code 1, `day_ahead.py` stops at the first failed task, and `/api/run/` answers 500 when the task fails. |
 | Cancelled tasks | A task cancelled in the web UI stays reported as "cancelled" instead of "error" (upstream PR 836, not merged there yet). |
 | Concurrent report requests | Database tables are reflected thread safely, so parallel `/api/report` calls no longer fail on a half-reflected table (upstream PR 833, not merged there yet). |
-| Smaller fixes | Empty-state page of the v2 chart view, Sass deprecation warnings, `.DS_Store` ignored. |
+| Smaller fixes | Empty-state page of the v2 chart view, `/v2/view-file` shows the log instead of an empty page, Sass deprecation warnings, `.DS_Store` ignored. |
 
 ---
 
