@@ -271,11 +271,50 @@ def calc_uur_index(dt: datetime, tijd: list, interval: str) -> int:
         delta = 60
     else:
         delta = 15
+    # een interval loopt tot het begin van het volgende; het laatste duurt delta
+    # minuten (de lijst kan na de kwartieren doorgaan met hele uren)
     for u in range(len(tijd)):
-        if dt < (tijd[u] + datetime.timedelta(minutes=delta)):
+        if u + 1 < len(tijd):
+            end_u = tijd[u + 1]
+        else:
+            end_u = tijd[u] + datetime.timedelta(minutes=delta)
+        if dt < end_u:
             result_index = u
             break
     return result_index
+
+
+def steps_covering_hours(step_h: list, start: int, hours: float) -> int:
+    """
+    Het aantal stappen vanaf index start dat samen minstens hours uur beslaat
+    :param step_h: lengte van iedere stap in uren
+    :param start: index van de eerste stap
+    :param hours: het aantal uren dat moet worden afgedekt
+    :return: aantal stappen; voorbij het eind van step_h telt iedere stap
+        even lang als de laatste
+    """
+    if hours <= 0 or len(step_h) == 0:
+        return 0
+    eps = 1e-9
+    num = 0
+    total = 0.0
+    while total < hours - eps:
+        index = start + num
+        total += step_h[index] if index < len(step_h) else step_h[-1]
+        num += 1
+    return num
+
+
+def steps_until_cooled(cum_cooling: list, delta: float) -> int:
+    """
+    Het aantal stappen waarna de afkoeling nog niet meer dan delta is
+    :param cum_cooling: afkoeling tot het begin van iedere stap, met als laatste
+        element de afkoeling over de hele horizon (cum_cooling[0] == 0)
+    :param delta: toegestane afkoeling in K
+    :return: de grootste u met cum_cooling[u] <= delta, of 0 als delta < 0
+    """
+    eps = 1e-9
+    return sum(1 for c in cum_cooling[1:] if c <= delta + eps) if delta >= 0 else 0
 
 
 def get_version():

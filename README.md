@@ -41,6 +41,7 @@ The branch `dev` follows upstream `main` and carries everything listed below.
 | Consolidate task | Runs to the end and saves the hourly cost and profit, continues after the last consolidated hour, stores local hours instead of hours shifted by the UTC offset, and keeps both repeated hours at the end of DST. |
 | Predicted quarter-hour prices | Sources that predict per quarter (epexpredictor, energypriceforecast_eu, jeroen_nl) no longer return each predicted slot up to four times; only hourly predictions are interpolated. |
 | Baseload of the first interval | A run that starts partway through an interval scales the first interval's baseload in the unoptimised reference, the "Overig verbr." bar, "Cost before optimize" and the logged prognoses table, as the optimisation already did. |
+| Hourly prediction tail at `15min` | With `interval: 15min` and price prediction, each hourly step of the predicted tail counts as an hour, not a quarter, for boiler cooling, heating and consumption, EV charging time, heat pump hours and run blocks, and machine runs; quarter hours in the tail are assigned to the hour they fall in. |
 | `prices_spot: false` | The calculation PNG no longer draws the spot price line when it is disabled. |
 | Task exit codes | A failed optimisation or price prediction exits with code 1, `day_ahead.py` stops at the first failed task, and `/api/run/` answers 500 when the task fails. |
 | Cancelled tasks | A task cancelled in the web UI stays reported as "cancelled" instead of "error" (upstream PR 836, not merged there yet). |
