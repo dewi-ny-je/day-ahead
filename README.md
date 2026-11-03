@@ -27,6 +27,7 @@ The branch `dev` follows upstream `main` and carries everything listed below.
 | Slimmer Docker image | Drops the CBC debug build, duplicate shared libraries, the NVIDIA NCCL dependency (xgboost-cpu), unused MySQL drivers, and the compilers, npm and headers in the runtime image; `build_miplib.sh` installs its toolchain itself when `use_self_compiled_miplib` is on. |
 | Same irradiance for ML and DAO solar predictions | Both predictors are fed the same measured/forecast irradiance, so their results can be compared. |
 | Release workflows | The version is typed once in `dao/config.yaml`, the image is built for a single architecture when that is all you need, and a manually given release tag that matches no `config.yaml` is written into it instead of stopping the build. |
+| Faster saving of the prognoses | The calculated prognoses are saved in two batched queries instead of row by row (0.2-0.3 s instead of 1.3-2.9 s), and the ML libraries are imported only when an ML solar prediction is used. |
 | Development setup | `run_dev.sh` detects and repairs a broken virtual environment; the Vite dev server works from another machine, behind a proxy and with several network addresses; troubleshooting notes in `DEVELOP.md`. |
 
 ### Fixes not in upstream
@@ -42,6 +43,8 @@ The branch `dev` follows upstream `main` and carries everything listed below.
 | Baseload of the first interval | A run that starts partway through an interval scales the first interval's baseload in the unoptimised reference, the "Overig verbr." bar, "Cost before optimize" and the logged prognoses table, as the optimisation already did. |
 | `prices_spot: false` | The calculation PNG no longer draws the spot price line when it is disabled. |
 | Task exit codes | A failed optimisation or price prediction exits with code 1, `day_ahead.py` stops at the first failed task, and `/api/run/` answers 500 when the task fails. |
+| Cancelled tasks | A task cancelled in the web UI stays reported as "cancelled" instead of "error" (upstream PR 836, not merged there yet). |
+| Concurrent report requests | Database tables are reflected thread safely, so parallel `/api/report` calls no longer fail on a half-reflected table (upstream PR 833, not merged there yet). |
 | Smaller fixes | Empty-state page of the v2 chart view, Sass deprecation warnings, `.DS_Store` ignored. |
 
 ---
