@@ -1,17 +1,39 @@
-<div class="col-12 p-1 sticky-top {% if task_state["status"] == "running" or task_state["status"] == "cancelled" %}bg-warning-subtle{% elif task_state["status"] == "error" %}bg-danger-subtle{% else %}bg-success-subtle{% endif %}">
+{% set state = job["state"] if job else "idle" %}
+<div class="col-12 p-1 sticky-top {% if state in ("running", "queued", "joined", "cancelled", "superseded") %}bg-warning-subtle{% elif state in ("error", "timeout") %}bg-danger-subtle{% else %}bg-success-subtle{% endif %}">
 <h2>
-    {{task_state["task"]}}: {{task_state["status"]}}
+    {% if job %}{{names.get(job["task"], job["task"])}}: {{state}}{% else %}idle{% endif %}
 </h2>
-{%if task_state["status"] != "idle" %}
+{% if job %}
 <p class="lead">
-    Started: {{started.strftime("%Y-%m-%d %H:%M:%S") if started else "-"}} || {{seconds_running if seconds_running else "-"}} seconds
+    Started: {{started.strftime("%Y-%m-%d %H:%M:%S") if started else "-"}} || {{seconds_running if seconds_running is not none else "-"}} seconds
 </p>
+{% endif %}
+{% if active %}
+<table class="table table-sm mb-1">
+    <thead><tr><th>#</th><th>Task</th><th>State</th><th>Source</th><th></th></tr></thead>
+    <tbody>
+    {% for entry in active %}
+    <tr{% if job and entry["id"] == job["id"] %} class="fw-bold"{% endif %}>
+        <td>{{entry.get("position") or ("" if entry["state"] == "joined" else "-")}}</td>
+        <td><a href="{{url_for('v2.task_state', job=entry['id'])}}" hx-get="{{url_for('v2.task_state', job=entry['id'])}}"
+               hx-target="#status-target" hx-push-url="false">{{names.get(entry["task"], entry["task"])}}</a></td>
+        <td>{{entry["state"]}}{% if entry.get("stop_reason") %} (stopping){% endif %}</td>
+        <td>{{entry["source"]}}</td>
+        <td><a href="{{url_for('v2.task_cancel', job=entry['id'])}}" hx-boost="false"
+               hx-get="{{url_for('v2.task_cancel', job=entry['id'])}}" hx-target="#status-target"
+               class="btn btn-sm btn-outline-danger py-0">Cancel</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
 {% endif %}
 </div>
 <pre>{{content}}</pre>
 
-{% if task_state["status"] == "running" %}
-<span hx-get="{{url_for('v2.task_state')}}" hx-trigger="load delay:1000ms" hx-swap="innerHTML scroll:bottom transition:true" hx-push-url="false"></span>
+{% if active or state in ("running", "queued", "joined") %}
+<span hx-get="{{url_for('v2.task_state', job=job['id'] if job else None)}}" hx-trigger="load delay:1000ms" hx-swap="innerHTML scroll:bottom transition:true" hx-push-url="false"></span>
+{% endif %}
+{% if running %}
 <script>document.getElementById('run-cancel').classList.remove('disabled')</script>
 {% else %}
 <script>document.getElementById('run-cancel').classList.add('disabled')</script>

@@ -3,10 +3,9 @@ import fnmatch
 import json
 import os
 import re
-import threading
 import time
 from pathlib import Path
-from subprocess import DEVNULL, Popen
+from subprocess import DEVNULL
 
 from flask import (
     Blueprint,
@@ -19,7 +18,7 @@ from flask import (
 )
 from werkzeug.security import safe_join
 
-from dao.prog import da_calc_graph
+from dao.prog import da_calc_graph, da_task_queue
 from dao.prog.config.loader import ConfigurationLoader
 from dao.prog.da_report import Report
 from dao.prog.version import __version__
@@ -136,139 +135,6 @@ def get_closest_index_from_list(flist: list, ts: float) -> int:
         range(len(flist)),
         key=lambda i: abs(flist[i].get("time", 0) - ts)
     )
-
-
-STATEFILE = "../data/task_state.json"
-STALE_AFTER = 600
-
-def save_task_state(state):
-    # Write to tmp file and replace (atomic)
-    # This prevents race condition between read and write
-    state = {
-        **state,
-        "last_update": time.time(),
-    }
-
-    temp_file = STATEFILE + ".tmp"
-
-    with open(temp_file, "w", encoding="utf-8") as f:
-        json.dump(state, f)
-        f.flush()
-        os.fsync(f.fileno())
-
-    os.replace(temp_file, STATEFILE)
-
-
-def get_task_state() -> dict:
-    no_state = {
-        "status": "idle",
-        "task": None,
-        "logfile": None,
-        "started": None,
-    }
-
-    try:
-        with open(STATEFILE, encoding="utf-8") as f:
-            state = json.load(f)
-    except FileNotFoundError:
-        return no_state
-    except (json.JSONDecodeError, OSError):
-        return no_state
-
-    last_update = state.get("last_update", 0)
-
-    if (
-        state.get("status") == "running"
-        and time.time() - last_update > STALE_AFTER
-    ):
-        return no_state
-
-    return state
-
-def run_and_log(cmd, state):
-    flist = get_file_list_with_ts(os.path.join(app_datapath, "log"),"*.log",)
-
-    last_log_file = None
-    if len(flist) > 0:
-        last_log_file = app_datapath + "log/" + flist[-1]["name"]
-
-    print(cmd)
-    proc = Popen(
-        cmd,
-        stdout=DEVNULL,
-        stderr=DEVNULL,
-        text=True,
-    )
-
-    cancelled = False
-
-    while proc.poll() is None:
-        time.sleep(1)
-
-        updated_state = get_task_state()
-
-        if updated_state.get("status") == "cancelled":
-            # Alleen afbreken zolang de taak nog loopt. Is ze tussen de poll
-            # hierboven en dit punt uit zichzelf klaar gekomen, dan telt haar
-            # eigen resultaat en blijft haar log staan.
-            if proc.poll() is None:
-                proc.kill()
-                proc.wait()
-                # Een door een signaal gedood proces levert een negatieve
-                # returncode; iets anders betekent dat het net zelf stopte.
-                cancelled = proc.returncode is not None and proc.returncode < 0
-
-            if cancelled and state["logfile"] and os.path.exists(state["logfile"]):
-                os.remove(state["logfile"])
-
-            break
-
-        if state["logfile"] is None:
-            flist = get_file_list_with_ts(
-                os.path.join(app_datapath, "log"),
-                "*.log",
-            )
-
-            if flist:
-                logfile = os.path.join(
-                    app_datapath,
-                    "log",
-                    flist[-1]["name"],
-                )
-
-                if logfile != last_log_file:
-                    state["logfile"] = logfile
-                    save_task_state(state)
-
-        elif state["logfile"] != updated_state.get("logfile"):
-            if os.path.exists(state["logfile"]):
-                os.remove(state["logfile"])
-
-            proc.kill()
-            break
-
-        # Neem de actuele status over voordat de heartbeat geschreven wordt.
-        state["status"] = updated_state.get("status", state["status"])
-
-        if state["status"] == "running":
-            save_task_state(state)
-
-    proc.wait()
-
-    updated_state = get_task_state()
-
-    if updated_state["logfile"] == state["logfile"]:
-        print("Task completed")
-        print(proc.returncode)
-        if cancelled:
-            # De taak is op verzoek afgebroken. De returncode van het gedode
-            # proces zegt niets over het resultaat, dus die mag "cancelled"
-            # niet overschrijven met "error".
-            state["status"] = "cancelled"
-        else:
-            state["status"] = "done" if proc.returncode == 0 else "error"
-        state["returncode"] = proc.returncode
-        save_task_state(state)
 
 
 def log_chart(datapath: str, pattern: str):
@@ -393,39 +259,31 @@ def tasks():
 
     return render_template("v2/tasks.html", tasks=ui_tasks)
 
+def _task_names() -> dict:
+    from dao.prog.da_const import tasks
+
+    return {key: task["name"] for key, task in tasks.items()}
+
+
 @v2.route("/task-cancel")
 def task_cancel():
-    try:
-        state = get_task_state()
-        state["status"] = "cancelled"
-        save_task_state(state)
-        return redirect(url_for('v2.task_state'))
-    except Exception:
-        return "Error cancelling task", 500
+    job_id = request.args.get("job")
+    if not job_id:
+        running = [j for j in da_task_queue.jobs() if j["state"] == da_task_queue.RUNNING]
+        job_id = running[0]["id"] if running else None
+    if job_id:
+        da_task_queue.cancel(job_id)
+    return redirect(url_for('v2.task_state', job=job_id))
 
 
 @v2.route("/task-exec", methods=["POST"])
 def task_exec():
     from dao.prog.da_const import tasks
-    current_state = get_task_state()
 
-    if current_state["status"] == "running":
-        return "Process already running: " + current_state["task"], 500
-
-    task_name = request.form.to_dict()["task"]
+    task_name = request.form.to_dict().get("task")
 
     if task_name not in tasks:
         return "Invalid task", 500
-
-    # Save the state synchronous to prevent race condition
-    state = {
-        "status": "running",
-        "started": time.time(),
-        "task": task_name,
-        "returncode": None,
-        "logfile": None,
-    }
-    save_task_state(state)
 
     cmd = tasks[task_name]["cmd"].copy()
     cmd[1] = "../prog/day_ahead.py"
@@ -433,51 +291,51 @@ def task_exec():
     if task_name == "get_day_ahead_prices":
         cmd.append(datetime.date.today().strftime("%Y-%m-%d"))
 
-    threading.Thread(
-        target=run_and_log,
-        args=(cmd, state),
-        daemon=True
-    ).start()
+    _proc, job_id, entry = da_task_queue.spawn(
+        cmd, source="gui", stdout=DEVNULL, stderr=DEVNULL
+    )
+    if entry is None:
+        return "Task could not be started", 500
 
-    return redirect(url_for('v2.task_state'))
+    return redirect(url_for('v2.task_state', job=job_id))
+
+
+def _job_content(job: dict | None, jobs: list[dict]) -> str:
+    if job is None:
+        return "No task has run yet"
+    logfile = job.get("logfile")
+    if not logfile and job.get("joined_to"):
+        # a joined request shows the log of the run it waits for
+        target = next((j for j in jobs if j["id"] == job["joined_to"]), None)
+        logfile = target.get("logfile") if target else None
+    if logfile:
+        try:
+            with open(logfile) as f:
+                return f.read()
+        except (OSError, UnicodeError):
+            return "Could not read logfile"
+    if job["state"] == da_task_queue.QUEUED:
+        return f"Waiting in the queue, position {job.get('position')}"
+    if job["state"] == da_task_queue.JOINED:
+        return f"The same task is already queued or running; waiting for its result ({job.get('joined_to')})"
+    return "No log data available"
 
 
 @v2.route("/task-state", methods=["GET"])
 def task_state():
-    current_state = get_task_state()
+    jobs = da_task_queue.jobs()
+    job_id = request.args.get("job")
+    job = next((j for j in jobs if j["id"] == job_id), None) if job_id else None
+    if job is None and jobs:
+        # the running task, else the next one in line, else the latest result
+        job = jobs[0]
 
-    content = "No logfile available"
+    active = [j for j in jobs if j["state"] in da_task_queue.ACTIVE_STATES]
     started = None
     seconds_running = None
-    status = current_state["status"]
-
-    if status != "idle":
-        started_timestamp = current_state.get("started")
-        started = (
-            datetime.datetime.fromtimestamp(started_timestamp)
-            if started_timestamp is not None
-            else None
-        )
-
-        last_update = (
-            time.time()
-            if status == "running"
-            else current_state.get("last_update")
-        )
-
-        seconds_running = None
-        if last_update is not None and started is not None:
-            last_update = datetime.datetime.fromtimestamp(last_update)
-            seconds_running = int((last_update - started).total_seconds())
-
-        if current_state.get("logfile") is None:
-            content = "No log data available yet"
-        else:
-            try:
-                with open(current_state["logfile"]) as f:
-                    content = f.read()
-            except (OSError, UnicodeError):
-                content = "Could not read logfile"
+    if job is not None and job.get("started"):
+        started = datetime.datetime.fromtimestamp(job["started"])
+        seconds_running = int((job.get("finished") or time.time()) - job["started"])
 
     headers = {
         "HX-Push-Url": "false",
@@ -485,10 +343,13 @@ def task_state():
 
     return render_template(
         "v2/task-status.html",
-        task_state=current_state,
+        job=job,
+        active=active,
+        names=_task_names(),
+        running=any(j["state"] == da_task_queue.RUNNING for j in active),
         started=started,
         seconds_running=seconds_running,
-        content=content,
+        content=_job_content(job, jobs),
     ), headers
 
 

@@ -27,7 +27,7 @@ from utils import (
     power_weighted_efficiency,
 )
 
-from dao.prog import da_calc_graph
+from dao.prog import da_calc_graph, da_task_queue
 from dao.prog.config.models.devices.heating import cop_temperature_factor
 from dao.prog.da_base import DaBase
 from dao.prog.da_report import Report
@@ -3533,6 +3533,8 @@ class DaCalc(DaBase):
         # er is een oplossing
         # afdrukken van de resultaten
         logging.info("Het programma heeft een optimale oplossing gevonden.")
+        # from here on the results are written: a stop request waits for that
+        da_task_queue.protect_output()
         old_cost_da = 0
         sum_old_cons = 0
         org_l = []
@@ -4905,10 +4907,6 @@ def main():
                 return key
         return None
 
-    da_calc = DaCalc("../data/options.json")
-    if da_calc.config is None:
-        return
-
     args = sys.argv[1:]
     cmd = args[0] if args else None
 
@@ -4933,13 +4931,23 @@ def main():
         print(f"Unknown task: {cmd}\nUse --help to list available tasks.")
         sys.exit(1)
 
-    da_calc.debug = "--debug" in args or cmd == "calc_debug"
-    exit_code = da_calc.run_task_function(task)
+    # wait for this task's turn in the shared queue before opening any
+    # database or Home Assistant connection
+    job_id = da_task_queue.run_gate(task, args[1:], tasks[task])
 
-    if exit_code is False:
-        exit_code = 1
+    exit_code = 1
+    try:
+        da_calc = DaCalc("../data/options.json")
+        if da_calc.config is not None:
+            da_calc.debug = "--debug" in args or cmd == "calc_debug"
+            exit_code = da_calc.run_task_function(task)
 
-    da_calc.db_da.log_pool_status()
+            if exit_code is False:
+                exit_code = 1
+
+            da_calc.db_da.log_pool_status()
+    finally:
+        da_task_queue.finish(job_id, int(exit_code or 0))
 
     os._exit(exit_code)
 
