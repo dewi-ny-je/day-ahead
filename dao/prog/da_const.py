@@ -1,4 +1,9 @@
 
+# queue_group: requests with the same group (and the same extra arguments)
+#   count as the same task in the task queue; the task name when absent
+# on_duplicate: what a new request does when the same task is already queued
+#   or running: "restart" supersedes the older one, "join" (the default)
+#   waits for it and takes its result; see da_task_queue
 tasks: dict[str, dict[str, str | list[str] | bool]] = {
     "calc_optimum_met_debug": {
         "name": "Optimaliseringsberekening met debug",
@@ -6,6 +11,8 @@ tasks: dict[str, dict[str, str | list[str] | bool]] = {
         "object": "DaCalc",
         "function": "calc_optimum_met_debug",
         "file_name": "calc_debug",
+        "queue_group": "calc",
+        "on_duplicate": "restart",
         "aliases": ["calc_debug", "calc_met_debug"],
         "ui_enabled": True,
     },
@@ -15,6 +22,8 @@ tasks: dict[str, dict[str, str | list[str] | bool]] = {
         "object": "DaBase",
         "function": "calc_optimum",
         "file_name": "calc",
+        "queue_group": "calc",
+        "on_duplicate": "restart",
         "aliases": ["calc", "calc_zonder_debug"],
         "ui_enabled": True,
     },

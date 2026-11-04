@@ -30,41 +30,46 @@ def main():
         routes = importlib.import_module("dao.webserver.app.v2.routes")
         constants = importlib.import_module("dao.prog.da_const")
         flask = importlib.import_module("flask")
-        state = {"status": "idle", "task": "synthetic"}
-        polls = 0
+        queue = importlib.import_module("dao.prog.da_task_queue")
+        jobs = []
+        polls = {}
 
-        def get_state():
-            nonlocal polls
-            if state["status"] == "running":
-                polls += 1
-                if state["task"] == "complete" and polls >= 3:
-                    state.update(status="completed", returncode=0, last_update=time.time())
-            return state.copy()
+        def list_jobs():
+            for job in jobs:
+                if job["state"] == queue.RUNNING:
+                    polls[job["id"]] = polls.get(job["id"], 0) + 1
+                    if job["task"] == "complete" and polls[job["id"]] >= 3:
+                        job.update(state=queue.DONE, exit_code=0, finished=time.time())
+            return [dict(job) for job in jobs]
 
-        def save_state(value):
-            nonlocal polls
-            state.clear()
-            state.update(value)
-            polls = 0
+        def spawn(cmd, source, **kwargs):
+            job = {"id": f"job{len(jobs) + 1}", "task": cmd[-1], "source": source,
+                   "state": queue.RUNNING, "started": time.time(), "finished": None,
+                   "logfile": None}
+            jobs.append(job)
+            return None, job["id"], dict(job)
+
+        def cancel(job_id):
+            for job in jobs:
+                if job["id"] == job_id and job["state"] in queue.ACTIVE_STATES:
+                    job.update(state=queue.CANCELLED, finished=time.time())
+                    return True
+            return False
 
         def forbid_process(*args, **kwargs):
             raise AssertionError("Browser fixtures must never launch task processes")
 
-        class SyntheticThread:
-            def __init__(self, **kwargs):
-                pass
-
-            def start(self):
-                pass
-
-        routes.get_task_state = get_state
-        routes.save_task_state = save_state
-        routes.threading = SimpleNamespace(Thread=SyntheticThread)
-        routes.run_and_log = forbid_process
-        routes.Popen = forbid_process
+        routes.da_task_queue = SimpleNamespace(
+            spawn=spawn, jobs=list_jobs, cancel=cancel,
+            RUNNING=queue.RUNNING, QUEUED=queue.QUEUED, JOINED=queue.JOINED,
+            ACTIVE_STATES=queue.ACTIVE_STATES,
+        )
+        queue.spawn = forbid_process
         constants.tasks = {
-            "complete": {"name": "Run synthetic task", "cmd": ["never", "never"], "ui_enabled": True},
-            "waiting": {"name": "Run cancellable task", "cmd": ["never", "never"], "ui_enabled": True},
+            "complete": {"name": "Run synthetic task", "cmd": ["never", "never", "complete"],
+                         "ui_enabled": True},
+            "waiting": {"name": "Run cancellable task", "cmd": ["never", "never", "waiting"],
+                        "ui_enabled": True},
         }
         # Only this isolated fixture enables task routes; all task IO above is
         # replaced before serving. Production preview protections stay intact.
@@ -73,7 +78,7 @@ def main():
         @app.before_request
         def restrict_fixture_routes():
             if flask.request.endpoint == "v2.tasks":
-                save_state({"status": "idle", "task": "synthetic"})
+                jobs.clear()
             if flask.request.endpoint not in {
                 "v2.tasks", "v2.task_exec", "v2.task_state", "v2.task_cancel", "static",
             }:
