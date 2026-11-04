@@ -2,10 +2,9 @@ import datetime
 import logging
 import sys
 import time
+from subprocess import Popen
 
 from da_base import DaBase
-
-from dao.prog import da_task_queue
 
 
 class DaScheduler(DaBase):
@@ -19,17 +18,11 @@ class DaScheduler(DaBase):
         }
 
     def run_task_process(self, key_task):
-        """Start a task and return once it is in the task queue.
-
-        The task queue runs the tasks one at a time, so the scheduler does not
-        wait for a task to end: tasks due while another one runs are queued
-        instead of skipped. Waiting for the enrolment keeps tasks due in the
-        same minute in their scheduled order.
-        """
         run_task = self.tasks[key_task]
-        _proc, _job_id, entry = da_task_queue.spawn(run_task["cmd"], source="scheduler")
-        if entry is None:
-            logging.error(f"Task {key_task} did not enter the task queue")
+        proc = Popen(run_task["cmd"])
+        proc.wait()
+        if proc.returncode != 0 and proc.returncode is not None:
+            print(f"Task {key_task} crashed with exit code {proc.returncode}")
             return False
         return True
 

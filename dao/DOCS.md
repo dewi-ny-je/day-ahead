@@ -1626,25 +1626,6 @@ Bijvoorbeeld : <br/>
 `"1255": "get_day_ahead_prices"`: haal de actuele prijzen op om 12 uur 55<br>
 `"xx00": "calc_optimum"`: ieder uur exact om "00" wordt de optimaliseringsberekening uitgevoerd.
 
-#### Wachtrij
-Alle taken, of ze nu door de scheduler, via de api, via het dashboard of vanaf de commandoregel
-worden gestart, gaan door één wachtrij. Er draait steeds maar één taak tegelijk; de andere taken
-wachten op hun beurt en worden in volgorde van aankomst uitgevoerd. Een geplande taak die valt
-terwijl een andere taak nog loopt, wordt dus niet overgeslagen maar later uitgevoerd.
-
-Wordt een taak aangevraagd die al in de wachtrij staat of al draait, dan geldt:
-* **calc_optimum** (met of zonder debug): de oudere aanvraag vervalt. Staat die nog in de wachtrij,
-dan neemt de nieuwe aanvraag haar plaats in; draait die al, dan wordt ze gestopt en is de nieuwe
-aanvraag direct daarna aan de beurt. Zo rekent het programma altijd met de laatste instellingen,
-bijvoorbeeld na het inplannen van een apparaat. Een berekening die al resultaten aan het wegschrijven
-is, maakt dat eerst af, zodat Home Assistant geen half bijgewerkte planning krijgt.
-* **alle andere taken**: er wordt niets dubbel gestart; de nieuwe aanvraag wacht op de taak die
-er al is en krijgt het resultaat daarvan.
-
-Een taak die langer dan 30 minuten draait, wordt gestopt. De wachttijd in de wachtrij telt daarbij niet mee.
-Op de pagina **Run** van het dashboard zie je de lopende taak en de wachtrij en kun je iedere taak
-afzonderlijk annuleren.
-
 ---
 
 ## Api
@@ -1669,18 +1650,6 @@ doorgezet naar Home Assistant.
 * ```get_tibber```: haalt verbruiksgegevens (consumption, production, cost, profit) op bij Tibber en slaat deze op in de database<br/>
 * ```get_meteo```: haalt prognose van meteogegevens op bij Meteoserver en slaat deze op in de database
 * ```get_prices```: haalt de day-ahead prijzen voor de volgende dag op en slaat deze op in de database<br/>
-
-De aanvraag gaat door de [wachtrij](#wachtrij) en het antwoord komt pas als de taak klaar is.
-Het antwoord bevat het log van de taak, met als statuscode:
-* **200**: de taak is gelukt
-* **500**: de taak is mislukt of duurde te lang
-* **409**: de taak is vervangen door een nieuwere aanvraag van dezelfde taak, of geannuleerd
-
-Met ```?wait=0``` achter de url wacht de api niet op het einde van de taak, maar antwoordt meteen met
-statuscode **202** en de plaats in de wachtrij, bijvoorbeeld
-```{"job": "3f2a9c1e5b7d", "task": "calc_optimum", "state": "queued", "position": 1}```.
-Gebruik dit voor taken die lang kunnen duren of moeten wachten: na 120 seconden breekt de webserver een
-wachtende aanvraag af, terwijl de taak zelf gewoon doorgaat.
 
 Een uitgewerkt voorbeeld hoe je vanuit Home Assistant een berekening kunt starten:<br/>
 - Maak een (of meer) rest-commands aan. <br/>

@@ -24,7 +24,6 @@ from sqlalchemy import Table, and_, func, select
 from dao.lib.da_meteo import Meteo
 from dao.lib.da_prices import DaPrices
 from dao.lib.db_connections import make_db_da, make_db_ha
-from dao.prog import da_task_queue
 from dao.prog.config.loader import ConfigurationLoader
 
 # from dao.prog.solar_predictor import SolarPredictor
@@ -678,7 +677,6 @@ class DaBase(hass.Hass):
             )
 
             file_handler = logging.FileHandler(file_name)
-            da_task_queue.record_logfile(file_name)
             file_handler.setLevel(self.log_level)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
@@ -701,8 +699,6 @@ class DaBase(hass.Hass):
                 f"{datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')} "
                 f"taak: {run_task['function']}"
             )
-            if da_task_queue.start_note():
-                logging.info(da_task_queue.start_note())
             self.db_da.log_pool_status()
             ret_val = getattr(self, run_task["function"])()
 
