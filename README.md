@@ -8,10 +8,15 @@
 ## About this fork
 
 This fork of [corneel27/day-ahead](https://github.com/corneel27/day-ahead) adds fixes and
-features that were not accepted upstream, either because their usefulness was not
-recognised or because they were generated with LLMs. This fork is entirely LLM-driven:
-its changes are written, reviewed and merged with the help of large language models.
-The branch `dev` follows upstream `main` and carries everything listed below.
+features that were for various reasons not accepted upstream (for example, due to use of LLM). 
+
+This fork is entirely LLM-driven: I provide the requirements, even in great detail, but then 
+the code is written, reviewed and merged with the help of large language models.
+
+**This fork, in this branch `dev`, follows upstream `main` and no feature is 
+(currently) missing or so different to require changes for the user.** 
+
+In addition, it provides the extras listed below.
 
 ### Features not in upstream
 
