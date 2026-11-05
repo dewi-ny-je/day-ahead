@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from dao.prog.config.models.pricing import PricingConfig, ProductionBonusConfig
 from dao.prog.production_bonus import (
+    AnnualCapCounter,
     AnnualCapUsage,
     ProductionBonus,
     interval_durations,
@@ -275,3 +276,66 @@ class TestHelpers:
         assert usage.used_before(2000) == 1.0
         assert usage.used_before(1e12) == 3.5
         assert AnnualCapUsage([], []).used_before(1e12) == 0
+
+    def test_annual_cap_usage_start_kwh(self):
+        usage = AnnualCapUsage([900, 1800], [1.0, 2.0], start_kwh=10.0)
+        assert usage.used_before(0) == 10.0
+        assert usage.used_before(900) == 11.0
+        assert usage.used_before(1e12) == 13.0
+
+    def test_cap_reached_matches_used_before(self):
+        usage = AnnualCapUsage([900, 1800, 2700], [1.0, 0.0, 2.5], start_kwh=0.5)
+        for cap in (0, 0.5, 1.0, 1.5, 4.0, 5.0):
+            for t in (0, 899, 900, 1800, 2699, 2700, 1e12):
+                assert usage.cap_reached(t, cap) == (usage.used_before(t) >= cap)
+
+    def test_cap_reached_before_first_interval(self):
+        usage = AnnualCapUsage([5000], [1.0], start_kwh=8.0, reached_ts=1200)
+        assert usage.reached_at(7.5) == 1200
+        assert not usage.cap_reached(1199, 7.5)
+        assert usage.cap_reached(1200, 7.5)
+
+
+class TestAnnualCapCounter:
+    def test_round_trip(self, tmp_path):
+        path = str(tmp_path / "counter.json")
+        counter = AnnualCapCounter(path, "abc")
+        assert counter.load(2026) is None
+        until = ts(2026, 3, 1)
+        counter.save(2026, until, 1234.567891234, ts(2026, 2, 1))
+        state = AnnualCapCounter(path, "abc").load(2026)
+        assert state == {"until": until, "kwh": 1234.567891234, "reached": ts(2026, 2, 1)}
+        assert AnnualCapCounter(path, "abc").load(2025) is None
+
+    def test_other_fingerprint_ignored(self, tmp_path):
+        path = str(tmp_path / "counter.json")
+        AnnualCapCounter(path, "abc").save(2026, ts(2026, 3, 1), 10.0, None)
+        assert AnnualCapCounter(path, "other").load(2026) is None
+
+    def test_until_outside_year_ignored(self, tmp_path):
+        path = str(tmp_path / "counter.json")
+        AnnualCapCounter(path, "abc").save(2026, ts(2027, 3, 1), 10.0, None)
+        assert AnnualCapCounter(path, "abc").load(2026) is None
+
+    def test_corrupt_file_ignored(self, tmp_path):
+        path = tmp_path / "counter.json"
+        path.write_text("{not json")
+        counter = AnnualCapCounter(str(path), "abc")
+        assert counter.load(2026) is None
+        counter.save(2026, ts(2026, 3, 1), 10.0, None)
+        assert counter.load(2026)["kwh"] == 10.0
+
+    def test_keeps_two_years(self, tmp_path):
+        path = str(tmp_path / "counter.json")
+        counter = AnnualCapCounter(path, "abc")
+        for year in (2024, 2025, 2026):
+            counter.save(year, ts(year, 3, 1), float(year), None)
+        assert counter.load(2024) is None
+        assert counter.load(2025)["kwh"] == 2025.0
+        assert counter.load(2026)["kwh"] == 2026.0
+
+    def test_fingerprint(self):
+        a = AnnualCapCounter.make_fingerprint({"cap": 7500}, 52.1, {"db": "prod"})
+        b = AnnualCapCounter.make_fingerprint({"cap": 7000}, 52.1, {"db": "prod"})
+        assert a != b
+        assert a == AnnualCapCounter.make_fingerprint({"cap": 7500}, 52.1, {"db": "prod"})

@@ -5,6 +5,7 @@ import datetime
 import json
 import logging
 import math
+import os
 from io import BytesIO
 
 import matplotlib.pyplot as plt
@@ -29,17 +30,25 @@ from sqlalchemy import (
 from dao.lib.da_graph import GraphBuilder
 from dao.prog.da_base import DaBase
 from dao.prog.production_bonus import (
+    AnnualCapCounter,
     AnnualCapUsage,
     interval_durations,
     split_quarters,
 )
 from dao.prog.utils import get_value_from_dict
 
+# Teller van de teruglevering met bonus, naast options.json
+BONUS_COUNTER_FILE = "production_bonus_counter.json"
+# De teller loopt zoveel achter op nu: de teruglevering van de laatste twee dagen
+# wordt elke run opnieuw opgehaald, zodat later aangevulde gegevens meetellen
+BONUS_COUNTER_MARGIN = datetime.timedelta(days=2)
+
 # Rapportage-intervallen die een deel van een dag beschrijven.
 # "kwartier" wordt gebruikt als de optimalisering met een resolutie van 15 minuten draait.
 INTRADAY_INTERVALS = ("uur", "kwartier")
 
 # De lengte van zo'n interval; wordt o.a. gebruikt om te bepalen vanaf welk moment
+# er geen gerealiseerde data meer is en de prognoses beginnen.
 # er geen gerealiseerde data meer is en de prognoses beginnen.
 INTERVAL_DELTA = {
     "uur": datetime.timedelta(hours=1),
@@ -3402,20 +3411,38 @@ class Report(DaBase):
             ):
                 cached = (now_ts, self._production_bonus_usage(year))
                 self._bonus_usage_cache[year] = cached
-            if cached[1].used_before(start_ts) >= cap:
+            if cached[1].cap_reached(start_ts, cap):
                 return 0.0
         return bonus.bonus(start_ts, duration_s, market_price, supplier_cost)
 
-    def _production_bonus_usage(self, year: int) -> AnnualCapUsage:
+    def _production_bonus_counter(self) -> AnnualCapCounter:
+        bonus = self.production_bonus
+        config_dir = os.path.dirname(self.file_name or "../data/options.json")
+        source = (
+            {"ha": sorted(self.grid_production_sensors)}
+            if len(self.grid_production_sensors) > 0
+            else {"db": "prod"}
+        )
+        fingerprint = AnnualCapCounter.make_fingerprint(
+            bonus.config.model_dump(mode="json"),
+            bonus.latitude,
+            bonus.longitude,
+            self.ol_t_def,
+            source,
+        )
+        return AnnualCapCounter(
+            os.path.join(config_dir, BONUS_COUNTER_FILE), fingerprint
+        )
+
+    def _production_bonus_eligible(
+        self, start: datetime.datetime, end: datetime.datetime
+    ) -> tuple[list[float], list[float], list[float]]:
         """
-        Berekent uit de geregistreerde teruglevering (prod) hoeveel kWh in het
-        kalenderjaar al bonus heeft gekregen
+        Bonus-kWh van de geregistreerde teruglevering (prod) vanaf start tot end
+        :return: begintijdstippen van de opgehaalde rijen, en per kwartier het
+            eindtijdstip en de bonus-kWh
         """
         bonus = self.production_bonus
-        start = datetime.datetime(year, 1, 1)
-        end = min(datetime.datetime(year + 1, 1, 1), datetime.datetime.now())
-        if end <= start:
-            return AnnualCapUsage([], [])
         if len(self.grid_production_sensors) > 0:
             # uurwaarden uit de statistieken van ha
             df_prod = self.get_sensor_sum(
@@ -3456,10 +3483,57 @@ class Report(DaBase):
                         ts, duration, kwh, price_values[price_index], ol_t
                     )
                 )
-        usage = AnnualCapUsage(ends, eligible)
+        return [float(t) for t in prod_ts], ends, eligible
+
+    def _production_bonus_usage(self, year: int) -> AnnualCapUsage:
+        """
+        Berekent uit de geregistreerde teruglevering (prod) hoeveel kWh in het
+        kalenderjaar al bonus heeft gekregen. De opgeslagen teller geeft het
+        totaal tot het tijdstip waar de vorige run gebleven is, zodat alleen de
+        teruglevering daarna wordt opgehaald.
+        """
+        bonus = self.production_bonus
+        cap = bonus.config.annual_cap
+        now = datetime.datetime.now()
+        start = datetime.datetime(year, 1, 1)
+        end = min(datetime.datetime(year + 1, 1, 1), now)
+        if end <= start:
+            return AnnualCapUsage([], [])
+        counter = self._production_bonus_counter()
+        state = counter.load(year)
+        if state is not None and state["until"] <= now.timestamp():
+            fetch_from = datetime.datetime.fromtimestamp(state["until"])
+            start_kwh, reached = state["kwh"], state["reached"]
+        else:
+            fetch_from, start_kwh, reached = start, 0.0, None
+        if fetch_from < end:
+            row_starts, ends, eligible = self._production_bonus_eligible(
+                fetch_from, end
+            )
+        else:
+            row_starts, ends, eligible = [], [], []
+        usage = AnnualCapUsage(ends, eligible, start_kwh, reached)
+
+        # teller bijwerken tot het begin van de eerste rij na de marge: latere
+        # gegevens kunnen nog worden aangevuld en worden de volgende run opnieuw
+        # opgehaald
+        year_end_ts = datetime.datetime(year + 1, 1, 1).timestamp()
+        margin_ts = now.timestamp() - BONUS_COUNTER_MARGIN.total_seconds()
+        if year_end_ts <= margin_ts:
+            until = year_end_ts
+        else:
+            index = bisect.bisect_left(row_starts, margin_ts)
+            until = row_starts[index] if index < len(row_starts) else None
+        if until is not None and until > fetch_from.timestamp():
+            new_reached = usage.reached_at(cap) if cap is not None else None
+            if new_reached is not None and new_reached > until:
+                new_reached = None
+            counter.save(year, until, usage.used_before(until), new_reached)
+
         logging.info(
             f"Teruglevering met bonus in {year}: {usage.used_before(end.timestamp()):.0f} kWh "
-            f"(maximum {bonus.config.annual_cap:.0f} kWh)"
+            f"(maximum {cap:.0f} kWh, {len(row_starts)} rijen opgehaald vanaf "
+            f"{fetch_from:%Y-%m-%d %H:%M})"
         )
         return usage
 

@@ -6,10 +6,12 @@ Report.get_price_data with a production bonus, on a fake database
 import datetime
 import os
 import time
+import types
 
 import pandas as pd
 import pytest
 
+from dao.prog import da_report
 from dao.prog.config.models.pricing import ProductionBonusConfig
 from dao.prog.da_report import Report
 from dao.prog.production_bonus import ProductionBonus
@@ -199,3 +201,121 @@ class TestPrediction:
                 assert row.da_prod == pytest.approx(with_bonus(row.da_ex))
             else:
                 assert row.da_prod == pytest.approx(row.da_ex + OL_T)
+
+
+class ColumnDb(FakeDb):
+    """Like FakeDb, with a table per (table, column) and a log of the queried ranges."""
+
+    def __init__(self, columns: dict[tuple[str, str], dict[float, float]]):
+        super().__init__({})
+        self.columns = columns
+        self.queries = []
+
+    def get_column_data(self, tablename, column_name, start=None, end=None, agg_func=None):
+        self.queries.append((tablename, column_name, start, end))
+        self.tables = {tablename: self.columns[(tablename, column_name)]}
+        return super().get_column_data(tablename, column_name, start, end, agg_func)
+
+
+def fake_now(monkeypatch, moment: datetime.datetime):
+    class FixedDatetime(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromtimestamp(moment.timestamp(), tz)
+
+    monkeypatch.setattr(
+        da_report,
+        "datetime",
+        types.SimpleNamespace(datetime=FixedDatetime, timedelta=datetime.timedelta),
+    )
+
+
+YEAR_START = datetime.datetime(2026, 1, 1)
+
+
+def counter_db(until: datetime.datetime) -> ColumnDb:
+    # 1 kWh per hour, a constant positive price
+    prod = {
+        YEAR_START.timestamp() + h * 3600: 1.0
+        for h in range(int((until - YEAR_START).total_seconds() // 3600))
+    }
+    prices = quarters(YEAR_START.timestamp(), until.timestamp(), lambda u: 0.10)
+    return ColumnDb({("values", "prod"): prod, ("values", "da"): prices})
+
+
+def counter_report(db, tmp_path, cap=None) -> Report:
+    # window 08:00-18:00: 10 kWh bonus per day
+    report = make_report(db, start="08:00", end="18:00", **{"annual cap": cap})
+    report.file_name = str(tmp_path / "options.json")
+    report.grid_production_sensors = []
+    return report
+
+
+def prod_starts(db: ColumnDb) -> list:
+    return [q[2] for q in db.queries if q[1] == "prod"]
+
+
+class TestAnnualCapCounter:
+    def test_second_run_fetches_only_the_tail(self, tmp_path, monkeypatch):
+        now = datetime.datetime(2026, 6, 10, 12)
+        db = counter_db(datetime.datetime(2026, 7, 1))
+        report = counter_report(db, tmp_path, cap=7500)
+        fake_now(monkeypatch, now)
+        first = report._production_bonus_usage(2026)
+        assert prod_starts(db) == [YEAR_START]
+        days = (now - YEAR_START).days
+        assert first.used_before(now.timestamp()) == pytest.approx(days * 10 + 4)
+        assert (tmp_path / "production_bonus_counter.json").exists()
+
+        later = now + datetime.timedelta(days=1, hours=3)
+        fake_now(monkeypatch, later)
+        db.queries.clear()
+        second = report._production_bonus_usage(2026)
+        # the counter stops two days before the previous run
+        assert prod_starts(db) == [now - datetime.timedelta(days=2)]
+        expected = (later - YEAR_START).days * 10 + 7
+        assert second.used_before(later.timestamp()) == pytest.approx(expected)
+
+        # same result as a full recomputation
+        (tmp_path / "production_bonus_counter.json").unlink()
+        db.queries.clear()
+        full = report._production_bonus_usage(2026)
+        assert prod_starts(db) == [YEAR_START]
+        assert full.used_before(later.timestamp()) == pytest.approx(expected)
+
+    def test_reached_cap_kept_in_counter(self, tmp_path, monkeypatch):
+        # 105 kWh: reached on the 11th day at 13:00 (100 kWh before, 5 more)
+        reached = datetime.datetime(2026, 1, 11, 13)
+        db = counter_db(datetime.datetime(2026, 3, 1))
+        report = counter_report(db, tmp_path, cap=105)
+        fake_now(monkeypatch, datetime.datetime(2026, 2, 1))
+        first = report._production_bonus_usage(2026)
+        assert first.reached_at(105) == reached.timestamp()
+
+        fake_now(monkeypatch, datetime.datetime(2026, 2, 20))
+        db.queries.clear()
+        second = report._production_bonus_usage(2026)
+        assert prod_starts(db) == [datetime.datetime(2026, 1, 30)]
+        assert not second.cap_reached(reached.timestamp() - 1, 105)
+        assert second.cap_reached(reached.timestamp(), 105)
+        assert second.cap_reached(datetime.datetime(2026, 2, 19).timestamp(), 105)
+
+    def test_other_settings_recompute(self, tmp_path, monkeypatch):
+        db = counter_db(datetime.datetime(2026, 3, 1))
+        fake_now(monkeypatch, datetime.datetime(2026, 2, 1))
+        counter_report(db, tmp_path, cap=7500)._production_bonus_usage(2026)
+        db.queries.clear()
+        usage = counter_report(db, tmp_path, cap=105)._production_bonus_usage(2026)
+        assert prod_starts(db) == [YEAR_START]
+        assert usage.reached_at(105) == datetime.datetime(2026, 1, 11, 13).timestamp()
+
+    def test_finished_year_needs_no_query(self, tmp_path, monkeypatch):
+        db = counter_db(datetime.datetime(2027, 1, 1))
+        report = counter_report(db, tmp_path, cap=7500)
+        fake_now(monkeypatch, datetime.datetime(2027, 1, 10))
+        first = report._production_bonus_usage(2026)
+        assert first.used_before(datetime.datetime(2027, 1, 1).timestamp()) == pytest.approx(3650)
+        db.queries.clear()
+        second = report._production_bonus_usage(2026)
+        assert prod_starts(db) == []
+        assert second.used_before(datetime.datetime(2027, 1, 1).timestamp()) == pytest.approx(3650)

@@ -5,7 +5,12 @@ bijv. de Zonneplan Zonnebonus: 10% over (marktprijs + 0,02) van zonsopkomst tot 
 
 import bisect
 import datetime
+import hashlib
+import json
+import logging
 import math
+import os
+import tempfile
 
 import ephem
 
@@ -158,17 +163,132 @@ def split_quarters(
 class AnnualCapUsage:
     """Cumulatieve teruglevering met bonus binnen een kalenderjaar."""
 
-    def __init__(self, end_timestamps: list[float], eligible_kwh: list[float]):
+    def __init__(
+        self,
+        end_timestamps: list[float],
+        eligible_kwh: list[float],
+        start_kwh: float = 0.0,
+        reached_ts: float | None = None,
+    ):
+        """
+        :param end_timestamps: eindtijdstippen van de intervallen, oplopend
+        :param eligible_kwh: bonus-kWh per interval
+        :param start_kwh: bonus-kWh van het jaar tot het eerste interval
+        :param reached_ts: eindtijdstip van het interval waarin het maximum werd
+            bereikt, als dat voor het eerste interval ligt
+        """
         self._ends = end_timestamps
+        self._start_kwh = start_kwh
+        self._reached_ts = reached_ts
         self._cumulative = []
-        total = 0.0
+        total = start_kwh
         for kwh in eligible_kwh:
             total += kwh
             self._cumulative.append(total)
 
     def used_before(self, ts: float) -> float:
-        """Verbruikte bonus-kWh van intervallen die op of voor ts eindigen."""
+        """
+        Verbruikte bonus-kWh van intervallen die op of voor ts eindigen;
+        voor ts voor het eerste interval: start_kwh
+        """
         index = bisect.bisect_right(self._ends, ts)
         if index == 0:
-            return 0.0
+            return self._start_kwh
         return self._cumulative[index - 1]
+
+    def reached_at(self, cap: float) -> float | None:
+        """Eindtijdstip van het interval waarin cap werd bereikt, None als nog niet."""
+        if self._reached_ts is not None:
+            return self._reached_ts
+        if self._start_kwh >= cap:
+            return -math.inf
+        index = bisect.bisect_left(self._cumulative, cap)
+        if index == len(self._cumulative):
+            return None
+        return self._ends[index]
+
+    def cap_reached(self, ts: float, cap: float) -> bool:
+        """True als de intervallen die op of voor ts eindigen samen cap halen."""
+        reached = self.reached_at(cap)
+        return reached is not None and ts >= reached
+
+
+class AnnualCapCounter:
+    """
+    Per kalenderjaar opgeslagen teller van de teruglevering met bonus, zodat een
+    run alleen de teruglevering sinds de vorige run hoeft op te halen.
+    Per jaar: "until" (unix timestamp tot waar geteld is), "kwh" (bonus-kWh
+    voor "until") en "reached" (eindtijdstip van het interval waarin het maximum
+    werd bereikt, of None). Een teller met een andere "fingerprint" (andere
+    instellingen of bron) wordt niet gebruikt.
+    """
+
+    VERSION = 1
+
+    def __init__(self, path: str, fingerprint: str):
+        self.path = path
+        self.fingerprint = fingerprint
+
+    @staticmethod
+    def make_fingerprint(*parts) -> str:
+        text = json.dumps(parts, sort_keys=True, default=str)
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _read(self) -> dict:
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return {}
+        if (
+            not isinstance(data, dict)
+            or data.get("version") != self.VERSION
+            or data.get("fingerprint") != self.fingerprint
+            or not isinstance(data.get("years"), dict)
+        ):
+            return {}
+        return data["years"]
+
+    def load(self, year: int) -> dict | None:
+        """De teller van year, of None als er geen bruikbare teller is."""
+        state = self._read().get(str(year))
+        if not isinstance(state, dict):
+            return None
+        try:
+            until = float(state["until"])
+            kwh = float(state["kwh"])
+            reached = state.get("reached")
+            reached = None if reached is None else float(reached)
+        except (KeyError, TypeError, ValueError):
+            return None
+        year_start = datetime.datetime(year, 1, 1).timestamp()
+        year_end = datetime.datetime(year + 1, 1, 1).timestamp()
+        if not year_start <= until <= year_end or kwh < 0 or not math.isfinite(kwh):
+            return None
+        if reached is not None and not reached <= until:
+            return None
+        return {"until": until, "kwh": kwh, "reached": reached}
+
+    def save(self, year: int, until: float, kwh: float, reached: float | None):
+        years = self._read()
+        years[str(year)] = {"until": until, "kwh": kwh, "reached": reached}
+        # alleen het lopende en het vorige jaar bewaren
+        keep = sorted(years, key=int)[-2:]
+        data = {
+            "version": self.VERSION,
+            "fingerprint": self.fingerprint,
+            "years": {y: years[y] for y in keep},
+        }
+        directory = os.path.dirname(self.path) or "."
+        try:
+            # de webserver en de scheduler kunnen tegelijk lezen en schrijven
+            fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp, self.path)
+            except BaseException:
+                os.unlink(tmp)
+                raise
+        except OSError as e:
+            logging.warning(f"Teller zonnebonus niet opgeslagen in {self.path}: {e}")
