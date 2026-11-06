@@ -102,6 +102,45 @@ class DaCalc(DaBase):
         self.machines = self.config.machines
         # self.start_logging()
 
+    def _read_planned_datetime(
+        self, entity_id: str | None, machine_name: str
+    ) -> dt.datetime | None:
+        """Return the datetime stored in a machine's calculated start/end entity.
+
+        Returns None when no entity is configured, or when the entity cannot be
+        read or holds no valid "%Y-%m-%d %H:%M:%S" value; in the last two cases
+        a warning is logged and the machine is planned as if it has no previous
+        plan.
+        """
+        if entity_id is None:
+            return None
+        try:
+            state = self.get_state(entity_id).state
+            return dt.datetime.strptime(state, "%Y-%m-%d %H:%M:%S")
+        except Exception as ex:
+            logging.warning(
+                f"Vorige planning van {machine_name} niet leesbaar uit "
+                f"{entity_id} ({ex}); er wordt gepland zonder vorige planning. "
+                f"Maak een input_datetime (met datum en tijd) aan voor {entity_id}."
+            )
+            return None
+
+    def _write_planned_datetime(
+        self, entity_id: str, value: str, machine_name: str
+    ) -> bool:
+        """Write a calculated start/end time with the set_datetime service.
+
+        Returns False and logs a warning when the service call fails.
+        """
+        try:
+            self.call_service("set_datetime", entity_id=entity_id, datetime=value)
+            return True
+        except Exception as ex:
+            logging.warning(
+                f"Planning van {machine_name} niet geschreven naar {entity_id}: {ex}"
+            )
+            return False
+
     def calc_optimum(
         self,
         _start_dt: dt.datetime | None = None,
@@ -3064,31 +3103,30 @@ class DaCalc(DaBase):
                 start_dt.year, start_dt.month, start_dt.day
             ) - dt.timedelta(days=1)
             planned_end_dt = planned_start_dt
-            if ma_entity_plan_start[m] is None:
-                if ma_entity_plan_end[m] is None:
-                    error = True
-                    logging.error(
-                        f"Er zijn geen entities voor doorgeven van de planning gedefinieerd "
-                        f"bij de instellingen van {ma_name[m]}."
-                    )
-                else:
-                    planned_end_str = self.get_state(ma_entity_plan_end[m]).state
-                    planned_end_dt = dt.datetime.strptime(
-                        planned_end_str, "%Y-%m-%d %H:%M:%S"
-                    )
-                    planned_start_dt = planned_end_dt - dt.timedelta(minutes=RL[m] * 15)
-            else:
-                planned_start_str = self.get_state(ma_entity_plan_start[m]).state
-                planned_start_dt = dt.datetime.strptime(
-                    planned_start_str, "%Y-%m-%d %H:%M:%S"
+            if ma_entity_plan_start[m] is None and ma_entity_plan_end[m] is None:
+                error = True
+                logging.error(
+                    f"Er zijn geen entities voor doorgeven van de planning gedefinieerd "
+                    f"bij de instellingen van {ma_name[m]}."
                 )
-                if ma_entity_plan_end[m] is not None:
-                    planned_end_str = self.get_state(ma_entity_plan_end[m]).state
-                    planned_end_dt = dt.datetime.strptime(
-                        planned_end_str, "%Y-%m-%d %H:%M:%S"
+            else:
+                prev_start_dt = self._read_planned_datetime(
+                    ma_entity_plan_start[m], ma_name[m]
+                )
+                prev_end_dt = self._read_planned_datetime(
+                    ma_entity_plan_end[m], ma_name[m]
+                )
+                run_length = dt.timedelta(minutes=RL[m] * 15)
+                if prev_start_dt is not None:
+                    planned_start_dt = prev_start_dt
+                    planned_end_dt = (
+                        prev_end_dt
+                        if prev_end_dt is not None
+                        else prev_start_dt + run_length
                     )
-                else:
-                    planned_end_dt = planned_start_dt + dt.timedelta(minutes=RL[m] * 15)
+                elif prev_end_dt is not None:
+                    planned_end_dt = prev_end_dt
+                    planned_start_dt = prev_end_dt - run_length
             ma_planned_start_dt.append(
                 planned_start_dt
             )  # de planning van de vorige geslaagde run
@@ -4720,12 +4758,10 @@ class DaCalc(DaBase):
                                         f"Zou zijn gestart op {start_machine_str}"
                                     )
                                 else:
-                                    self.call_service(
-                                        "set_datetime",
-                                        entity_id=ma_entity_plan_start[m],
-                                        datetime=start_machine_str,
-                                    )
-                                    logging.info(f"Start op {start_machine_str}")
+                                    if self._write_planned_datetime(
+                                        ma_entity_plan_start[m], start_machine_str, ma_name[m]
+                                    ):
+                                        logging.info(f"Start op {start_machine_str}")
                             end_machine_str = (
                                 ma_kw_dt[m][r + RL[m] - 1] + dt.timedelta(seconds=900)
                             ).strftime("%Y-%m-%d %H:%M")
@@ -4733,12 +4769,10 @@ class DaCalc(DaBase):
                                 if self.debug:
                                     logging.info(f"Zou klaar zijn op {end_machine_str}")
                                 else:
-                                    self.call_service(
-                                        "set_datetime",
-                                        entity_id=ma_entity_plan_end[m],
-                                        datetime=end_machine_str,
-                                    )
-                                    logging.info(f"Is klaar op {end_machine_str}")
+                                    if self._write_planned_datetime(
+                                        ma_entity_plan_end[m], end_machine_str, ma_name[m]
+                                    ):
+                                        logging.info(f"Is klaar op {end_machine_str}")
                     if start_machine_str == "":
                         logging.info("Niet ingepland")
 
