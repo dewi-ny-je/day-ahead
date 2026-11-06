@@ -3400,7 +3400,8 @@ class Report(DaBase):
         """
         bonus = self.production_bonus
         cap = bonus.config.annual_cap
-        if cap is not None:
+        # 0 of leeg: geen maximum, de teruglevering wordt niet geteld
+        if cap:
             year = datetime.datetime.fromtimestamp(start_ts).year
             now_ts = datetime.datetime.now().timestamp()
             cached = self._bonus_usage_cache.get(year)

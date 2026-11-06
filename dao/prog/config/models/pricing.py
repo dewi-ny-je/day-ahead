@@ -94,7 +94,8 @@ class ProductionBonusConfig(BaseModel):
             "future intervals keep the full bonus until the cap is reached by recorded feed-in. "
             "The running total is kept in production_bonus_counter.json next to options.json, so "
             "each run only reads the feed-in of the last two days; delete that file to count the "
-            "whole year again. Leave empty for no cap. Zonneplan: 7500.",
+            "whole year again. Leave empty or set to 0 for no cap: the feed-in is then not read or "
+            "counted at all. Zonneplan: 7500.",
             "x-unit": "kWh",
             "x-ui-section": "Production bonus",
         },

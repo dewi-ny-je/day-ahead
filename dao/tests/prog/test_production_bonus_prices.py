@@ -319,3 +319,15 @@ class TestAnnualCapCounter:
         second = report._production_bonus_usage(2026)
         assert prod_starts(db) == []
         assert second.used_before(datetime.datetime(2027, 1, 1).timestamp()) == pytest.approx(3650)
+
+    def test_zero_cap_skips_counting(self, tmp_path, monkeypatch):
+        db = counter_db(datetime.datetime(2026, 3, 1))
+        report = counter_report(db, tmp_path, cap=0)
+        report._bonus_usage_cache = {}
+        fake_now(monkeypatch, datetime.datetime(2026, 2, 1))
+        start = ts(2026, 1, 20, 12)
+        assert report._production_bonus_price(start, QUARTER, 0.10, OL_T) == pytest.approx(
+            0.10 * (0.10 + OL_T)
+        )
+        assert prod_starts(db) == []
+        assert not (tmp_path / "production_bonus_counter.json").exists()
