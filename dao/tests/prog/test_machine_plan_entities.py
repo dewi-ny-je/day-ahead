@@ -11,6 +11,8 @@ class _Calc:
     _write_planned_datetime = DaCalc._write_planned_datetime
     _read_machine_window = DaCalc._read_machine_window
     _reset_instant_start = DaCalc._reset_instant_start
+    _planned_program_index = DaCalc._planned_program_index
+    _write_planned_program = DaCalc._write_planned_program
 
     def __init__(self, states=None, fail_write=False, machines=None):
         self.states = states or {}
@@ -18,6 +20,12 @@ class _Calc:
         self.written = []
         self.turned_off = []
         self.machines = machines or []
+
+    def set_value(self, entity_id, value):
+        self.call_service("set_value", entity_id=entity_id, value=value)
+
+    def select_option(self, entity_id, option):
+        self.call_service("select_option", entity_id=entity_id, option=option)
 
     def turn_off(self, entity_id):
         if self.fail_write:
@@ -237,3 +245,78 @@ def test_failed_reset_of_instant_start_warns(caplog):
         calc._reset_instant_start(0)
 
     assert "input_boolean.wm_now" in caplog.text
+
+
+PROGRAMS = [
+    SimpleNamespace(name="off", power=[]),
+    SimpleNamespace(name="eco", power=[2000, 500]),
+]
+
+
+def _program_machine(program_entity):
+    return SimpleNamespace(
+        name="wm", programs=PROGRAMS, entity_calculated_program=program_entity
+    )
+
+
+def test_planned_program_without_entity_is_the_selected_one():
+    calc = _Calc(machines=[_program_machine(None)])
+
+    assert calc._planned_program_index(0, 0) == 0
+
+
+def test_planned_program_is_read_from_the_entity():
+    calc = _Calc(
+        {"input_text.wm_program": "eco"},
+        machines=[_program_machine("input_text.wm_program")],
+    )
+
+    assert calc._planned_program_index(0, 0) == 1
+
+
+def test_unknown_planned_program_falls_back_to_the_selected_one(caplog):
+    calc = _Calc(
+        {"input_text.wm_program": "unknown"},
+        machines=[_program_machine("input_text.wm_program")],
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert calc._planned_program_index(0, 1) == 1
+    assert "input_text.wm_program" in caplog.text
+
+
+def test_missing_planned_program_entity_falls_back_to_the_selected_one(caplog):
+    calc = _Calc(machines=[_program_machine("input_text.wm_program")])
+
+    with caplog.at_level(logging.WARNING):
+        assert calc._planned_program_index(0, 1) == 1
+    assert "input_text.wm_program" in caplog.text
+
+
+def test_planned_program_is_written_to_an_input_text():
+    calc = _Calc(machines=[_program_machine("input_text.wm_program")])
+
+    calc._write_planned_program(0, "eco")
+
+    assert calc.written == [
+        ("set_value", {"entity_id": "input_text.wm_program", "value": "eco"})
+    ]
+
+
+def test_planned_program_is_selected_in_an_input_select():
+    calc = _Calc(machines=[_program_machine("input_select.wm_program")])
+
+    calc._write_planned_program(0, "eco")
+
+    assert calc.written == [
+        ("select_option", {"entity_id": "input_select.wm_program", "option": "eco"})
+    ]
+
+
+def test_failed_write_of_planned_program_warns(caplog):
+    calc = _Calc(fail_write=True, machines=[_program_machine("input_text.wm_program")])
+
+    with caplog.at_level(logging.WARNING):
+        calc._write_planned_program(0, "eco")
+
+    assert "input_text.wm_program" in caplog.text

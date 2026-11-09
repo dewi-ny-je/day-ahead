@@ -101,6 +101,16 @@ class MachineConfig(BaseModel):
             "x-ui-widget-filter": "input_datetime,datetime",
         },
     )
+    entity_calculated_program: EntityId | None = Field(
+        default=None,
+        alias="entity calculated program",
+        description="HA entity for the program of the calculated plan",
+        json_schema_extra={
+            "x-help": "Optional: Home Assistant entity where the system writes the program the calculated start and end belong to. While that run is going on, its remaining consumption is taken from this program, so the selected program can change (for example back to 'off', or to the next run's program) without changing the planned consumption. Without it, the program selected at the time of each optimisation is used. An input_text, or an input_select/select with the program names as options.",
+            "x-ui-section": "Machine Specifications",
+            "x-ui-widget-filter": "input_text,input_select,select",
+        },
+    )
     entity_instant_start: EntityId | None = Field(
         default=None,
         alias="entity instant start",

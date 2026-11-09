@@ -204,6 +204,56 @@ class DaCalc(DaBase):
             return None
         return start_window_dt, end_window_dt, has_date
 
+    def _planned_program_index(self, m: int, selected_index: int) -> int:
+        """Return the index of the program machine m's previous plan was made with.
+
+        Reads the program name from the optional 'entity calculated program'.
+        Falls back to selected_index, the program selected now, when no such
+        entity is configured, or, with a warning, when it cannot be read or
+        holds no known program name.
+        """
+        machine = self.machines[m]
+        entity_id = machine.entity_calculated_program
+        if entity_id is None:
+            return selected_index
+        try:
+            state = self.get_state(entity_id).state
+        except Exception as ex:
+            logging.warning(
+                f"Programma van de vorige planning van {machine.name} niet leesbaar "
+                f"uit {entity_id} ({ex}); het geselecteerde programma wordt gebruikt."
+            )
+            return selected_index
+        for index, program in enumerate(machine.programs):
+            if program.name == state:
+                return index
+        logging.warning(
+            f"Programma '{state}' in {entity_id} is geen programma van "
+            f"{machine.name}; voor de vorige planning wordt het geselecteerde "
+            f"programma gebruikt."
+        )
+        return selected_index
+
+    def _write_planned_program(self, m: int, program_name: str) -> None:
+        """Store the program of machine m's new plan in 'entity calculated program'.
+
+        Uses select_option for an input_select or select entity and set_value
+        otherwise (input_text). A failure is logged as a warning.
+        """
+        machine = self.machines[m]
+        entity_id = machine.entity_calculated_program
+        try:
+            if entity_id.split(".")[0] in ("input_select", "select"):
+                self.select_option(entity_id, program_name)
+            else:
+                self.set_value(entity_id, program_name)
+            logging.info(f"Programma {program_name} opgeslagen in {entity_id}")
+        except Exception as ex:
+            logging.warning(
+                f"Programma {program_name} van {machine.name} niet geschreven naar "
+                f"{entity_id}: {ex}"
+            )
+
     def _reset_instant_start(self, m: int) -> None:
         """Turn off the instant start entity of machine m.
 
@@ -3148,6 +3198,8 @@ class DaCalc(DaBase):
         ma_uur_kw = []  # per machine een list met beschikbare kwartieren
         ma_kw_dt = []  # per machine een list op welk tijdstip een kwartier begint
         program_index = []  # nummer in de lijst welk programma van een machine gaat draaien
+        # nummer van het programma waarmee de vorige planning is gemaakt
+        ma_planned_program_index = []
         ma_name = []  # naam van de machine
         # entity voor opvragen vorig en teruggeven berekend nieuw start-tijdstip
         ma_entity_plan_start = []
@@ -3182,6 +3234,11 @@ class DaCalc(DaBase):
             )
             program_index.append(p)
             RL.append(len(self.machines[m].programs[p].power))  # aantal stappen
+            ma_planned_program_index.append(self._planned_program_index(m, p))
+            # aantal kwartieren van de vorige planning
+            planned_rl = len(
+                self.machines[m].programs[ma_planned_program_index[m]].power
+            )
             entity_machine_instant_start = self.machines[m].entity_instant_start
             if entity_machine_instant_start is None:
                 machine_instant_start = False
@@ -3216,7 +3273,7 @@ class DaCalc(DaBase):
                 previous_plan = self._previous_plan(
                     prev_start_dt,
                     prev_end_dt,
-                    dt.timedelta(minutes=RL[m] * 15),
+                    dt.timedelta(minutes=planned_rl * 15),
                     ma_name[m],
                 )
                 if previous_plan is not None:
@@ -3511,7 +3568,12 @@ class DaCalc(DaBase):
                         c_ma_sum = 0
                         start_interval_dt = max(tijd[u], start_dt)
                         end_interval_dt = tijd[u] + dt.timedelta(seconds=step_s[u])
-                        for kw in range(RL[m]):
+                        planned_power = (
+                            self.machines[m]
+                            .programs[ma_planned_program_index[m]]
+                            .power
+                        )
+                        for kw in range(len(planned_power)):
                             start_kw_dt = ma_planned_start_dt[m] + dt.timedelta(
                                 minutes=kw * 15
                             )
@@ -3521,13 +3583,7 @@ class DaCalc(DaBase):
                             if start_overlap_dt < end_overlap_dt:
                                 verschil = end_overlap_dt - start_overlap_dt
                                 fraction = verschil.seconds / 900
-                                c_ma_sum += (
-                                    self.machines[m]
-                                    .programs[program_index[m]]
-                                    .power[kw]
-                                    * fraction
-                                    / 4000
-                                )
+                                c_ma_sum += planned_power[kw] * fraction / 4000
                         model += c_ma_u[m][u] == c_ma_sum
                     else:
                         model += c_ma_u[m][u] == 0
@@ -4878,6 +4934,14 @@ class DaCalc(DaBase):
                                         ma_entity_plan_end[m], end_machine_str, ma_name[m]
                                     ):
                                         logging.info(f"Is klaar op {end_machine_str}")
+                            if self.machines[m].entity_calculated_program is not None:
+                                if self.debug:
+                                    logging.info(
+                                        f"Programma {program_selected[m]} zou zijn "
+                                        f"opgeslagen"
+                                    )
+                                elif start_written:
+                                    self._write_planned_program(m, program_selected[m])
                             if ma_instant_start[m]:
                                 if self.debug:
                                     logging.info(

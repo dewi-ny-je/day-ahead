@@ -622,6 +622,7 @@ Examples:
 | `entity selected program` | [EntityId](#entityid) | Yes | — | HA entity for selected program |
 | `entity calculated start` | [EntityId](#entityid) | Yes | — | HA entity for calculated optimal start time |
 | `entity calculated end` | [EntityId](#entityid) | Yes | — | HA entity for calculated end time |
+| `entity calculated program` | [EntityId](#entityid) (optional) | No | `null` | HA entity for the program of the calculated plan |
 | `entity instant start` | [EntityId](#entityid) (optional) | No | `null` | HA entity for instant start |
 
 <details>
@@ -654,6 +655,10 @@ Home Assistant entity where system writes the calculated optimal start time. Use
 **`entity calculated end`**
 
 Home Assistant entity where system writes the calculated program end time. Useful for notifications and planning.
+
+**`entity calculated program`**
+
+Optional: Home Assistant entity where the system writes the program the calculated start and end belong to. While that run is going on, its remaining consumption is taken from this program, so the selected program can change (for example back to 'off', or to the next run's program) without changing the planned consumption. Without it, the program selected at the time of each optimisation is used. An input_text, or an input_select/select with the program names as options.
 
 **`entity instant start`**
 
