@@ -81,3 +81,31 @@ def test_failed_write_warns_and_returns_false(caplog):
 
     assert not ok
     assert "input_datetime.wm_end" in caplog.text
+
+
+RUN = dt.timedelta(hours=2)
+START = dt.datetime(2026, 11, 5, 14, 0)
+
+
+def test_previous_plan_uses_both_stored_times():
+    end = START + dt.timedelta(hours=3)
+    assert DaCalc._previous_plan(START, end, RUN, "wm") == (START, end)
+
+
+def test_previous_plan_without_times_is_none():
+    assert DaCalc._previous_plan(None, None, RUN, "wm") is None
+
+
+def test_previous_plan_derives_missing_end_or_start():
+    assert DaCalc._previous_plan(START, None, RUN, "wm") == (START, START + RUN)
+    assert DaCalc._previous_plan(None, START, RUN, "wm") == (START - RUN, START)
+
+
+def test_previous_plan_ignores_an_end_not_after_the_start(caplog):
+    stale_end = START - dt.timedelta(days=1)
+
+    with caplog.at_level(logging.WARNING):
+        result = DaCalc._previous_plan(START, stale_end, RUN, "wm")
+
+    assert result == (START, START + RUN)
+    assert "wm" in caplog.text

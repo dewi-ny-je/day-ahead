@@ -125,6 +125,35 @@ class DaCalc(DaBase):
             )
             return None
 
+    @staticmethod
+    def _previous_plan(
+        prev_start_dt: dt.datetime | None,
+        prev_end_dt: dt.datetime | None,
+        run_length: dt.timedelta,
+        machine_name: str,
+    ) -> tuple[dt.datetime, dt.datetime] | None:
+        """Combine the stored start and end of a machine's previous plan.
+
+        A missing time is derived from the other one and the run length. An end
+        that is not after the start does not belong to the same plan as the
+        start, so the end is derived from the start instead. Returns None when
+        neither time is known.
+        """
+        if prev_start_dt is None:
+            if prev_end_dt is None:
+                return None
+            return prev_end_dt - run_length, prev_end_dt
+        if prev_end_dt is not None and prev_end_dt <= prev_start_dt:
+            logging.warning(
+                f"Opgeslagen eindtijd {prev_end_dt} van {machine_name} ligt niet na "
+                f"de starttijd {prev_start_dt}; de eindtijd wordt berekend uit de "
+                f"starttijd."
+            )
+            prev_end_dt = None
+        if prev_end_dt is None:
+            prev_end_dt = prev_start_dt + run_length
+        return prev_start_dt, prev_end_dt
+
     def _write_planned_datetime(
         self, entity_id: str, value: str, machine_name: str
     ) -> bool:
@@ -3116,17 +3145,14 @@ class DaCalc(DaBase):
                 prev_end_dt = self._read_planned_datetime(
                     ma_entity_plan_end[m], ma_name[m]
                 )
-                run_length = dt.timedelta(minutes=RL[m] * 15)
-                if prev_start_dt is not None:
-                    planned_start_dt = prev_start_dt
-                    planned_end_dt = (
-                        prev_end_dt
-                        if prev_end_dt is not None
-                        else prev_start_dt + run_length
-                    )
-                elif prev_end_dt is not None:
-                    planned_end_dt = prev_end_dt
-                    planned_start_dt = prev_end_dt - run_length
+                previous_plan = self._previous_plan(
+                    prev_start_dt,
+                    prev_end_dt,
+                    dt.timedelta(minutes=RL[m] * 15),
+                    ma_name[m],
+                )
+                if previous_plan is not None:
+                    planned_start_dt, planned_end_dt = previous_plan
             ma_planned_start_dt.append(
                 planned_start_dt
             )  # de planning van de vorige geslaagde run
@@ -4752,15 +4778,17 @@ class DaCalc(DaBase):
                             else:
                                 ma_start_time = ma_kw_dt[m][r]
                             start_machine_str = ma_start_time.strftime("%Y-%m-%d %H:%M")
+                            start_written = True
                             if ma_entity_plan_start[m] is not None:
                                 if self.debug:
                                     logging.info(
                                         f"Zou zijn gestart op {start_machine_str}"
                                     )
                                 else:
-                                    if self._write_planned_datetime(
+                                    start_written = self._write_planned_datetime(
                                         ma_entity_plan_start[m], start_machine_str, ma_name[m]
-                                    ):
+                                    )
+                                    if start_written:
                                         logging.info(f"Start op {start_machine_str}")
                             end_machine_str = (
                                 ma_kw_dt[m][r + RL[m] - 1] + dt.timedelta(seconds=900)
@@ -4768,6 +4796,12 @@ class DaCalc(DaBase):
                             if ma_entity_plan_end[m] is not None:
                                 if self.debug:
                                     logging.info(f"Zou klaar zijn op {end_machine_str}")
+                                elif not start_written:
+                                    # Keep the stored start and end from the same plan.
+                                    logging.warning(
+                                        f"Eindtijd {end_machine_str} van {ma_name[m]} niet "
+                                        f"geschreven, omdat de starttijd niet geschreven is."
+                                    )
                                 else:
                                     if self._write_planned_datetime(
                                         ma_entity_plan_end[m], end_machine_str, ma_name[m]
