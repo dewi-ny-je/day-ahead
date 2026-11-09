@@ -591,6 +591,29 @@ def _install_model_capture(patches: _PatchList, target) -> None:
     patches.set(mip.Model, "optimize", _wrapped_optimize)
 
 
+# Onthoudt per variabele-index het bestand en de regel waar add_var() werd aangeroepen, zodat een kolom die niet in de registry staat toch terug te vinden is in day_ahead.py.
+def _install_add_var_capture(patches: _PatchList, target) -> None:
+    """Wraps ``mip.Model.add_var`` so ``target._creation_site`` maps each
+    new ``Var.idx`` to ``"file.py:line"`` of the caller. Indices restart at
+    0 per model, so with more than one model in a run the later model's
+    entries overwrite the earlier ones — same "last model wins" rule as
+    ``_install_model_capture``."""
+    if mip is None:
+        return
+    original_add_var = mip.Model.add_var
+
+    # Maakt de variabele echt aan en legt daarna de aanroeplocatie vast.
+    def _wrapped_add_var(model_self, *args, **kwargs):
+        v = original_add_var(model_self, *args, **kwargs)
+        frame = sys._getframe(1)
+        target._creation_site[v.idx] = (
+            f"{os.path.basename(frame.f_code.co_filename)}:{frame.f_lineno}"
+        )
+        return v
+
+    patches.set(mip.Model, "add_var", _wrapped_add_var)
+
+
 # Zet een opgelost model om naar een result-dict, gedeeld door RecordingIO en ReplayIO zodat beide dezelfde vorm opleveren om te diffen.
 def _build_result_dict(model, cbc_log_chunks: list[str], extra_meta: dict) -> dict | None:
     if model is None:
@@ -683,6 +706,7 @@ class RecordingIO:
         self._solar_calls: dict[str, list[dict]] = {}
         self._captured_at = dt.datetime.now()
         self._model = None  # last mip.Model.optimize() was called on
+        self._creation_site: dict[int, str] = {}  # Var.idx -> "file.py:line"
         self._cbc_log_chunks: list[str] = []
         self.snapshot_path: Path | None = None
         self.result_path: Path | None = None
@@ -900,6 +924,7 @@ class RecordingIO:
             )
 
         _install_model_capture(self._patches, self)
+        _install_add_var_capture(self._patches, self)
 
         # Leest de startwaarden opnieuw op het moment van de solve; dit zijn
         # precies de waarden waarmee het model is opgebouwd.
@@ -1225,6 +1250,7 @@ class ReplayIO:
         self._freeze = None  # freezegun handle, set in _install_patches
         self._restore_tz = None  # set when _install_patches changes the process TZ
         self._model = None  # last mip.Model.optimize() was called on
+        self._creation_site: dict[int, str] = {}  # Var.idx -> "file.py:line"
         self._cbc_log_chunks: list[str] = []
 
         meta = self._snapshot.get("meta", {})
@@ -1416,6 +1442,7 @@ class ReplayIO:
                 "wordt niet vastgelegd"
             )
         _install_model_capture(self._patches, self)
+        _install_add_var_capture(self._patches, self)
 
         original_init = DaBase.__init__
 
@@ -2026,13 +2053,25 @@ def _is_binding(c, tol: float = 1e-6) -> bool:
     return abs(activity - rhs) < tol
 
 
+# registry.by_idx plus de add_var()-aanroeplocatie van elke Var uit de
+# replay (ReplayIO._creation_site), zodat label_for_var ook een niet
+# geregistreerde Var naar zijn regel in day_ahead.py kan herleiden. Gedraagt
+# zich verder als de gewone dict die alle helpers als registry_by_idx krijgen.
+class VarIndex(dict):
+    def __init__(self, by_idx: dict, creation_site: dict[int, str]):
+        super().__init__(by_idx)
+        self.creation_site = creation_site
+
+
 # Vertaalt een Var naar zijn leesbare, benoemde label via de registry
 # ("ac_from_dc_w[b=0][u=9][ds=5]" in plaats van positionele haakjes), of
-# naar var(idx) als de Var niet geregistreerd is.
+# naar var(idx) als de Var niet geregistreerd is, met de aanroeplocatie van
+# add_var() erachter als die bekend is ("var(812)@day_ahead.py:1043").
 def label_for_var(var, registry_by_idx: dict) -> str:
     entry = registry_by_idx.get(var.idx)
     if entry is None:
-        return f"var({var.idx})"
+        site = getattr(registry_by_idx, "creation_site", {}).get(var.idx)
+        return f"var({var.idx})@{site}" if site else f"var({var.idx})"
     name, idx = entry
     dims = SHAPES.get(name)
     if not dims:
@@ -3539,6 +3578,7 @@ def cmd_dangling(args: argparse.Namespace, data_dir: Path) -> int:
         )
     if not registry:
         raise UsageError("no variable registry was captured")
+    registry.by_idx = VarIndex(registry.by_idx, replay._creation_site)
 
     dangling = _find_dangling_int_columns(model, registry.by_idx)
     integer_count = sum(1 for v in model.vars if v.var_type == "I")
@@ -3643,6 +3683,7 @@ def cmd_dump(args: argparse.Namespace, data_dir: Path) -> int:
             "dao/prog is on sys.path — that should already be arranged by "
             "this CLI, so this points at a real problem, not a missing flag"
         )
+    registry.by_idx = VarIndex(registry.by_idx, replay._creation_site)
 
     max_u = _max_known_interval(registry)
     if max_u >= 0 and not (0 <= args.interval <= max_u):
@@ -4157,6 +4198,39 @@ def cmd_selftest(args: argparse.Namespace, data_dir: Path) -> int:
         if any(e["label"] == "used_bin" for e in dangling["B"]):
             raise AssertionError("false positive: used_bin is referenced in a constraint")
 
+    # Legt via de add_var()-wrapper de aanroeplocatie vast en controleert dat
+    # een niet geregistreerde Var met die locatie wordt gelabeld, en een
+    # geregistreerde gewoon met zijn naam.
+    def _creation_site_label():
+        if mip is None:
+            return
+        from mip import CONTINUOUS, Model
+
+        class _Target:
+            _creation_site: dict[int, str] = {}
+
+        target = _Target()
+        patches = _PatchList()
+        _install_add_var_capture(patches, target)
+        try:
+            model = Model()
+            named = model.add_var(var_type=CONTINUOUS)
+            unregistered = model.add_var(var_type=CONTINUOUS)
+            line = sys._getframe().f_lineno - 1
+        finally:
+            patches.restore()
+        by_idx = VarIndex({named.idx: ("named", ())}, target._creation_site)
+        expected = f"var({unregistered.idx})@da_debug.py:{line}"
+        if label_for_var(unregistered, by_idx) != expected:
+            raise AssertionError(
+                f"unregistered var labelled {label_for_var(unregistered, by_idx)!r}, "
+                f"expected {expected!r}"
+            )
+        if label_for_var(named, by_idx) != "named":
+            raise AssertionError("registered var lost its name")
+        if label_for_var(unregistered, {}) != f"var({unregistered.idx})":
+            raise AssertionError("plain dict registry must keep the var(N) label")
+
     for name, fn in [
         ("dataframe_roundtrip", _dataframe_roundtrip),
         ("call_key_stability", _call_key_stability),
@@ -4173,6 +4247,7 @@ def cmd_selftest(args: argparse.Namespace, data_dir: Path) -> int:
         ("sigma_collapse_contiguity", _sigma_collapse_contiguity),
         ("pattern_labeller_coverage", _pattern_labeller_coverage),
         ("dangling_int_column_detection", _dangling_int_column_detection),
+        ("creation_site_label", _creation_site_label),
         ("dump_interval_charging_interval", _dump_interval_charging_interval),
         ("dump_interval_idle_interval", _dump_interval_idle_interval),
     ]:

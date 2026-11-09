@@ -2463,7 +2463,7 @@ class DaCalc(DaBase):
                 logging.info(f"Beschikbaar zijn: {hours_avail} uur")
                 if heat_needed > 0:
                     logging.info("On/off warmtepomp wordt ingepland")
-                    avg_temp_today = self.meteo.get_avg_temperature(date=calc_day)
+                    avg_temp_today = self.meteo.get_avg_temperature(calc_day)
                     logging.info(
                         f"Gem. buitentemperatuur vandaag: {avg_temp_today:.1f} °C"
                     )
