@@ -433,9 +433,7 @@ def power_weighted_efficiency(stages: list[dict]) -> float:
         return sum(efficiency for _, efficiency in points) / len(points)
 
     area = 0.0
-    for (power_low, eff_low), (power_high, eff_high) in zip(
-        points, points[1:], strict=False
-    ):
+    for (power_low, eff_low), (power_high, eff_high) in zip(points, points[1:], strict=False):
         area += (eff_low + eff_high) / 2 * (power_high - power_low)
     return area / span
 
@@ -547,9 +545,7 @@ def interpolate_prognose_data():
     print(prognose_data.to_string())
 
 
-def interpolate(
-    df: pd.DataFrame, field: str, quantity: bool = False, time_field: str = "tijd"
-) -> pd.DataFrame:
+def interpolate(df: pd.DataFrame, field: str, quantity: bool = False, time_field:str="tijd") -> pd.DataFrame:
     """
     Interpoleert uurwaarden (gegeven op hele uren, feitelijk H:30) naar kwartierwaarden.
     Voor elk uurblok worden 4 kwartierwaarden berekend, zodanig dat het gemiddelde
