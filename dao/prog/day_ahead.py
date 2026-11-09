@@ -488,11 +488,15 @@ class DaCalc(DaBase):
             b_l.append(b_l[-1])
         # p_avg1 = sum(pl) / U  # max(pl) #
         sum_w_prices = 0
+        sum_w_prices_t = 0
         sum_hf = 0
         for u in range(U):
             sum_w_prices += pl[u] * hour_fraction[u]
+            sum_w_prices_t += pt[u] * hour_fraction[u]
             sum_hf += hour_fraction[u]
         p_avg = sum_w_prices/sum_hf
+        # time-weighted average feed-in price over the horizon
+        p_avg_t = sum_w_prices_t / sum_hf
         for _u in range(U):
             pl_avg.append(p_avg)
 
@@ -3465,7 +3469,7 @@ class DaCalc(DaBase):
         if self.salderen:
             p_bat = p_avg
         else:
-            p_bat = sum(pt) / U
+            p_bat = p_avg_t
 
         # alles in kWh * prijs = kosten in euro
         model += cost == (
