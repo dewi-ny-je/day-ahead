@@ -1,5 +1,5 @@
-// Bootstrap-icons en het Prism-thema worden in main.js geimporteerd.
-@use "bootstrap/scss/bootstrap" as *;
+@use "bootstrap/scss/bootstrap";
+@import "bootstrap-icons/font/bootstrap-icons.css";
 
 @layer components {
 

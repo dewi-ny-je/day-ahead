@@ -53,7 +53,7 @@ In addition, it provides the extras listed below.
 | Task exit codes | A failed optimisation or price prediction exits with code 1, `day_ahead.py` stops at the first failed task, and `/api/run/` answers 500 when the task fails. |
 | Cancelled tasks | A task cancelled in the web UI stays reported as "cancelled" instead of "error" (upstream PR 836, not merged there yet). |
 | Concurrent report requests | Database tables are reflected thread safely, so parallel `/api/report` calls no longer fail on a half-reflected table (upstream PR 833, not merged there yet). |
-| Smaller fixes | Empty-state page of the v2 chart view, `/v2/view-file` shows the log instead of an empty page, Sass deprecation warnings, `.DS_Store` ignored. |
+| Smaller fixes | Empty-state page of the v2 chart view, `/v2/view-file` shows the log instead of an empty page, `.DS_Store` ignored. |
 
 ---
 

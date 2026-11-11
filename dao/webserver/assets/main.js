@@ -1,6 +1,5 @@
 // Bootstrap
 import * as bootstrap from 'bootstrap'
-import 'bootstrap-icons/font/bootstrap-icons.css'
 
 // HTMX
 import htmx from 'htmx.org'
