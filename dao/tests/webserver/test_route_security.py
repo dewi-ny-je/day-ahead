@@ -3,6 +3,7 @@ import importlib
 import json
 import logging
 from copy import deepcopy
+from subprocess import PIPE
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -10,6 +11,8 @@ import pytest
 import requests
 from hassapi.exceptions import ClientError as HassClientError
 from sqlalchemy.exc import OperationalError
+
+from dao.prog import da_task_queue
 
 # V1 reads configuration and opens a log at import time. Keep those startup
 # effects isolated from the route tests and the user's actual data.
@@ -20,40 +23,6 @@ with patch("dao.prog.config.loader.ConfigurationLoader.load_and_validate", retur
 api_routes = importlib.import_module("dao.webserver.app.api.routes")
 v2_routes = importlib.import_module("dao.webserver.app.v2.routes")
 v1_routes = importlib.import_module("dao.webserver.app.v1.routes")
-
-
-@pytest.mark.parametrize("age", [599, 600, 601])
-def test_running_task_expires_only_after_cutoff(monkeypatch, tmp_path, age):
-    state_file = tmp_path / "task_state.json"
-    state = {"status": "running", "task": "calculate", "logfile": "test.log",
-             "last_update": 1000 - age}
-    state_file.write_text(json.dumps(state), encoding="utf-8")
-    monkeypatch.setattr(v1_routes, "STATEFILE", str(state_file))
-    monkeypatch.setattr(v1_routes, "STALE_AFTER", 600)
-    monkeypatch.setattr(v1_routes.time, "time", lambda: 1000)
-
-    expected = {"status": "idle", "task": None, "logfile": None} if age > 600 else state
-    assert v1_routes.load_state() == expected
-
-
-@pytest.mark.parametrize("status", ["idle", "done", "failed"])
-def test_non_running_state_does_not_evaluate_missing_timestamp(monkeypatch, tmp_path, status):
-    state_file = tmp_path / "task_state.json"
-    state = {"status": status, "task": "calculate", "last_update": None}
-    state_file.write_text(json.dumps(state), encoding="utf-8")
-    monkeypatch.setattr(v1_routes, "STATEFILE", str(state_file))
-    assert v1_routes.load_state() == state
-
-
-@pytest.mark.parametrize("contents", [None, "invalid json"])
-def test_unavailable_task_state_falls_back_to_idle(monkeypatch, tmp_path, contents):
-    state_file = tmp_path / "task_state.json"
-    if contents is not None:
-        state_file.write_text(contents, encoding="utf-8")
-    monkeypatch.setattr(v1_routes, "STATEFILE", str(state_file))
-    result = v1_routes.load_state()
-    assert result["status"] == "idle"
-    assert result["task"] is None
 
 
 @pytest.mark.parametrize("solar_present", [False, True])
@@ -92,16 +61,20 @@ def test_api_task_and_aliases_execute_exactly_once(client, monkeypatch, tmp_path
     monkeypatch.chdir(program_dir)
     monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", False)
     monkeypatch.setattr(api_routes, "PROG_DIR", program_dir)
-    runner = Mock(return_value=SimpleNamespace(stdout="task output\n", stderr="task warning\n", returncode=0))
-    monkeypatch.setattr(api_routes, "subprocess_run", runner)
+    proc = Mock(returncode=0)
+    proc.communicate.return_value = ("task output\n", "task warning\n")
+    spawn = Mock(return_value=(proc, "job1", {"state": "running"}))
+    monkeypatch.setattr(da_task_queue, "spawn", spawn)
+    monkeypatch.setattr(da_task_queue, "final_state", Mock(return_value="done"))
 
     response = client.open(f"/api/run/{task}", method=method)
 
     assert response.status_code == 200
     assert response.mimetype == "text/plain"
     assert response.data == b"task output\ntask warning\n"
-    runner.assert_called_once_with(
-        api_routes.tasks["calc_optimum"]["cmd"], cwd=program_dir, capture_output=True, text=True,
+    spawn.assert_called_once_with(
+        api_routes.tasks["calc_optimum"]["cmd"], source="api", cwd=program_dir,
+        stdout=PIPE, stderr=PIPE, text=True,
     )
     logs = list(log_dir.glob("calc_*.log"))
     assert len(logs) == 1
@@ -111,7 +84,7 @@ def test_api_task_and_aliases_execute_exactly_once(client, monkeypatch, tmp_path
 @pytest.mark.parametrize("method", ["GET", "POST"])
 def test_unknown_task_is_escaped_plain_text(client, monkeypatch, method):
     runner = Mock(side_effect=AssertionError("Unknown task must not execute a command"))
-    monkeypatch.setattr(api_routes, "subprocess_run", runner)
+    monkeypatch.setattr(da_task_queue, "spawn", runner)
     response = client.open("/api/run/%3Cimg%20src=x%20onerror=alert(1)%3E", method=method)
     assert response.status_code == 400
     assert response.mimetype == "text/plain"
@@ -178,14 +151,11 @@ def test_bad_data_dates_are_client_errors(client, query):
     ("GET", "/v1/log", {}),
 ])
 def test_preview_blocks_live_tasks_and_shared_state(client, monkeypatch, method, path, data):
-    v1_routes = importlib.import_module("dao.webserver.app.v1.routes")
     monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", True)
     live_calls = [
-        (api_routes, "subprocess_run"),
-        (v2_routes, "get_task_state"),
-        (v2_routes, "Popen"),
-        (v1_routes, "load_state"),
-        (v1_routes, "Popen"),
+        (da_task_queue, "spawn"),
+        (da_task_queue, "jobs"),
+        (da_task_queue, "cancel"),
     ]
     mocks = []
     for module, name in live_calls:
@@ -224,3 +194,114 @@ def test_report_returns_data(client, monkeypatch):
     report.get_api_data.assert_called_once_with(
         "consumption", "vandaag_en_morgen", cumulate=True
     )
+
+
+def _run_api(client, monkeypatch, tmp_path, final_state, returncode=0, query=""):
+    program_dir = tmp_path / "prog"
+    program_dir.mkdir()
+    (tmp_path / "data" / "log").mkdir(parents=True)
+    monkeypatch.chdir(program_dir)
+    monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", False)
+    monkeypatch.setattr(api_routes, "PROG_DIR", program_dir)
+    proc = Mock(returncode=returncode)
+    proc.communicate.return_value = ("out", "")
+    monkeypatch.setattr(da_task_queue, "spawn", Mock(return_value=(proc, "job1", None)))
+    monkeypatch.setattr(da_task_queue, "final_state", Mock(return_value=final_state))
+    return client.get("/api/run/calc" + query)
+
+
+@pytest.mark.parametrize("final_state,returncode,status", [
+    ("done", 0, 200),
+    ("error", 1, 500),
+    ("timeout", -14, 500),
+    ("superseded", -15, 409),
+    ("cancelled", 4, 409),
+    (None, 0, 200),
+    (None, 1, 500),
+])
+def test_api_status_follows_the_queue_result(client, monkeypatch, tmp_path, final_state,
+                                             returncode, status):
+    response = _run_api(client, monkeypatch, tmp_path, final_state, returncode)
+    assert response.status_code == status
+
+
+def test_api_without_wait_answers_with_the_queue_position(client, monkeypatch):
+    monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", False)
+    spawn = Mock(return_value=(Mock(), "abc123", {"state": "queued", "position": 2}))
+    monkeypatch.setattr(da_task_queue, "spawn", spawn)
+    response = client.post("/api/run/calc?wait=0")
+
+    assert response.status_code == 202
+    assert response.json == {"job": "abc123", "task": "calc_optimum", "state": "queued",
+                             "position": 2}
+    assert spawn.call_args.args[0] == api_routes.tasks["calc_optimum"]["cmd"]
+    assert spawn.call_args.kwargs["source"] == "api"
+
+
+def test_gui_queues_a_task_while_another_one_runs(client, monkeypatch, tmp_path):
+    monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", False)
+    monkeypatch.setenv(da_task_queue.ENV_QUEUE_DIR, str(tmp_path))
+    running = da_task_queue.enrol("get_meteo_data", [], job_id="meteo1")
+    assert da_task_queue.wait_turn(running["id"], poll=0.01)["state"] == "running"
+    spawn = Mock(return_value=(Mock(), "calc1", {"state": "queued", "position": 1}))
+    monkeypatch.setattr(da_task_queue, "spawn", spawn)
+
+    response = client.post("/v2/task-exec", data={"task": "calc_optimum"})
+
+    assert response.status_code == 302
+    assert "job=calc1" in response.headers["Location"]
+    assert spawn.call_args.args[0][1] == "../prog/day_ahead.py"
+    assert spawn.call_args.kwargs["source"] == "gui"
+
+
+def test_task_state_lists_the_queue_and_cancels_per_job(client, monkeypatch, tmp_path):
+    monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", False)
+    monkeypatch.setenv(da_task_queue.ENV_QUEUE_DIR, str(tmp_path))
+    running = da_task_queue.enrol("get_meteo_data", [], job_id="meteo1")
+    da_task_queue.wait_turn(running["id"], poll=0.01)
+    da_task_queue.enrol("calc_optimum", [], job_id="calc1", source="gui")
+    monkeypatch.setattr(v2_routes, "vite_tags", lambda entry: "")
+
+    page = client.get("/v2/task-state?job=calc1").get_data(as_text=True)
+    assert "Waiting in the queue, position 1" in page
+    assert "Meteoprognoses ophalen" in page
+    assert "/v2/task-cancel?job=calc1" in page
+
+    client.get("/v2/task-cancel?job=calc1")
+    assert da_task_queue.final_state("calc1") == "cancelled"
+
+
+@pytest.mark.parametrize("state,status,msg", [
+    ("queued", "running", "staat in de wachtrij (plaats 1)"),
+    ("joined", "running", "wacht op dezelfde opdracht"),
+    ("superseded", "superseded", "vervangen door een nieuwere aanvraag"),
+])
+def test_v1_status_reports_the_queue_state(client, monkeypatch, tmp_path, state, status, msg):
+    monkeypatch.setenv(da_task_queue.ENV_QUEUE_DIR, str(tmp_path))
+    job = {"id": "v1job", "key": "calc", "task": "calc_optimum", "pid": 1, "source": "gui-v1",
+           "state": state, "seq": 1, "finished": 1.0 if state == "superseded" else None}
+    monkeypatch.setattr(da_task_queue, "_alive", lambda entry: True)
+    (tmp_path / "task_queue.json").write_text(json.dumps({"jobs": [job]}))
+
+    response = client.get("/v1/status").json
+
+    assert response["status"] == status
+    assert msg in response["msg"]
+
+
+def test_joined_request_shows_the_log_of_the_run_it_waits_for(client, monkeypatch, tmp_path):
+    monkeypatch.setitem(app.config, "DAO_WEB_PREVIEW", False)
+    monkeypatch.setenv(da_task_queue.ENV_QUEUE_DIR, str(tmp_path))
+    monkeypatch.setattr(v2_routes, "vite_tags", lambda entry: "")
+    log = tmp_path / "meteo.log"
+    log.write_text("meteo log line")
+    running = da_task_queue.enrol("get_meteo_data", [], job_id="meteo1")
+    da_task_queue.wait_turn(running["id"], poll=0.01)
+    monkeypatch.setattr(da_task_queue, "_current_job_id", "meteo1")
+    da_task_queue.record_logfile(str(log))
+    da_task_queue.enrol("get_meteo_data", [], job_id="meteo2", source="gui")
+
+    page = client.get("/v2/task-state?job=meteo2").get_data(as_text=True)
+
+    assert "joined" in page
+    assert "meteo log line" in page

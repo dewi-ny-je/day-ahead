@@ -26,6 +26,23 @@ def make_data_path():
         os.symlink("/config/dao_data", "../data")
 
 
+def unique_log_path(prefix: str, now: datetime.datetime | None = None) -> str:
+    """Create an empty log file named after prefix and the time, and return its path.
+
+    A file of the same second that already exists gets a number added, so two
+    runs started in the same second each write their own log.
+    """
+    stamp = (now or datetime.datetime.now()).strftime("%Y-%m-%d__%H:%M:%S")
+    number = 1
+    while True:
+        path = f"{prefix}{stamp}" + (f"_{number}" if number > 1 else "") + ".log"
+        try:
+            with open(path, "x"):
+                return path
+        except FileExistsError:
+            number += 1
+
+
 def is_laagtarief(dtime, switch_hour):
     jaar = dtime.year
     datum = datetime.datetime(dtime.year, dtime.month, dtime.day)

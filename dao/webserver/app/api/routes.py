@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from pathlib import Path
-from subprocess import run as subprocess_run
+from subprocess import DEVNULL, PIPE
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Blueprint, current_app, request
@@ -10,6 +10,7 @@ from markupsafe import escape
 from requests import RequestException
 from sqlalchemy.exc import OperationalError
 
+from dao.prog import da_task_queue
 from dao.prog.da_const import tasks
 from dao.prog.da_report import Report
 
@@ -82,14 +83,26 @@ def run_api(task: str):
             {"Content-Type": "text/plain; charset=utf-8"},
         )
 
-    proc = subprocess_run(
-        tasks[matched_task]["cmd"],
-        cwd=PROG_DIR,
-        capture_output=True,
-        text=True
+    cmd = tasks[matched_task]["cmd"]
+
+    if request.args.get("wait") == "0":
+        # start the task and answer at once with its place in the queue
+        _proc, job_id, entry = da_task_queue.spawn(
+            cmd, source="api", cwd=PROG_DIR, stdout=DEVNULL, stderr=DEVNULL
+        )
+        if entry is None:
+            return {"message": "Failed", "reason": "Taak kon niet worden gestart"}, 500
+        return {
+            "job": job_id,
+            "task": matched_task,
+            "state": entry["state"],
+            "position": entry.get("position"),
+        }, 202
+
+    proc, job_id, _entry = da_task_queue.spawn(
+        cmd, source="api", cwd=PROG_DIR, stdout=PIPE, stderr=PIPE, text=True
     )
-    data = proc.stdout
-    err = proc.stderr
+    data, err = proc.communicate()
     log_content = data + err
     filename = (
             "../data/log/"
@@ -104,9 +117,19 @@ def run_api(task: str):
     headers = {
         "Content-Type": "text/plain",
     }
-    # een mislukte taak ook als fout melden, met het log erbij
-    status = 200 if proc.returncode == 0 else 500
-    return log_content, status, headers
+    return log_content, run_status(da_task_queue.final_state(job_id), proc), headers
+
+
+def run_status(state: str | None, proc) -> int:
+    """The HTTP status for a task run that has ended in ``state``."""
+    if state in (da_task_queue.SUPERSEDED, da_task_queue.CANCELLED):
+        return 409
+    if state in (da_task_queue.ERROR, da_task_queue.TIMEOUT):
+        return 500
+    if state == da_task_queue.DONE:
+        return 200
+    # the task never entered the queue, e.g. on an invalid configuration
+    return 200 if getattr(proc, "returncode", 0) == 0 else 500
 
 
 @api.route("/data/")
