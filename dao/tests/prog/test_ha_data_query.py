@@ -240,16 +240,6 @@ def test_decimal_energy_values(database, start):
     populate(database, [(1, t, 0.1), (1, t+3600, 0.4)])
     assert_expected(database, start, [(int(t), 'cons', 0.3), (int(t+3600), 'cons', 0.0)], fields=['cons'])
 
-def test_sensor_units_are_converted_to_kwh(database, start):
-    database.report.energy_balance_dict['boil']['sensors'] = ['sensor.wh', 'sensor.a']
-    database.report.energy_balance_dict['wp']['sensors'] = ['sensor.mwh']
-    t = start.timestamp()
-    populate(database, [(4, t, 1000), (4, t+3600, 1500), (1, t, 2), (1, t+3600, 2.25),
-                        (5, t, 0.001), (5, t+3600, 0.003)])
-    assert_expected(database, start, [
-        (int(t), 'boil', 0.75), (int(t), 'wp', 2.0),
-        (int(t+3600), 'boil', 0.0), (int(t+3600), 'wp', 0.0),
-    ], fields=['boil', 'wp'])
 
 def test_sensor_units_are_converted_to_kwh(database, start):
     database.report.energy_balance_dict['boil']['sensors'] = ['sensor.wh', 'sensor.a']
