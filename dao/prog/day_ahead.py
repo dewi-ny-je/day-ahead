@@ -21,9 +21,9 @@ from pandas.core.dtypes.inference import is_number
 from utils import (
     calc_adjustment_heatcurve,
     calc_uur_index,
-    convert_timestr,
     error_handling,
     interpolate,
+    parse_window_state,
     power_weighted_efficiency,
     steps_covering_hours,
     steps_until_cooled,
@@ -153,6 +153,139 @@ class DaCalc(DaBase):
         if prev_end_dt is None:
             prev_end_dt = prev_start_dt + run_length
         return prev_start_dt, prev_end_dt
+
+    def _read_machine_window(
+        self,
+        start_entity: str | None,
+        end_entity: str | None,
+        now_dt: dt.datetime,
+        machine_name: str,
+    ) -> tuple[dt.datetime, dt.datetime, bool] | None:
+        """Read the start and end of a machine's planning window.
+
+        Each entity may hold a time of day or a full date and time (see
+        parse_window_state). Returns (start, end, has_date), where has_date is
+        True when at least one of the two holds a date; the window is then
+        used as it is. A time of day next to a date is placed relative to
+        that date: an end on the first day it falls after the start, a start
+        on the last day it falls before the end. Returns None, after logging why, when an entity is not
+        configured, cannot be read or holds no valid value, or when a window
+        with a date does not end after its start.
+        """
+        result = []
+        for entity_id, setting in (
+            (start_entity, "entity start window"),
+            (end_entity, "entity end window"),
+        ):
+            if entity_id is None:
+                logging.error(
+                    f"De '{setting}' is niet gedefinieerd bij de instellingen "
+                    f"van {machine_name}. Apparaat {machine_name} wordt niet "
+                    f"ingepland."
+                )
+                return None
+            try:
+                state = self.get_state(entity_id).state
+                result.append(parse_window_state(state, now_dt))
+            except Exception as ex:
+                logging.error(
+                    f"Planning-window van {machine_name} niet leesbaar uit "
+                    f"{entity_id} ({ex}); verwacht een tijd (HH:MM:SS) of een "
+                    f"datum met tijd. Apparaat {machine_name} wordt niet ingepland."
+                )
+                return None
+        (start_window_dt, start_has_date), (end_window_dt, end_has_date) = result
+        if start_has_date and not end_has_date:
+            # de eindtijd ligt op de eerste dag waarop die na het begin valt
+            end_window_dt = dt.datetime.combine(
+                start_window_dt.date(), end_window_dt.time()
+            )
+            if end_window_dt <= start_window_dt:
+                end_window_dt += dt.timedelta(days=1)
+        elif end_has_date and not start_has_date:
+            # de begintijd ligt op de laatste dag waarop die voor het einde valt
+            start_window_dt = dt.datetime.combine(
+                end_window_dt.date(), start_window_dt.time()
+            )
+            if start_window_dt >= end_window_dt:
+                start_window_dt -= dt.timedelta(days=1)
+        has_date = start_has_date or end_has_date
+        if has_date and end_window_dt <= start_window_dt:
+            logging.error(
+                f"Planning-window van {machine_name} eindigt ({end_window_dt}) "
+                f"niet na het begin ({start_window_dt}). Apparaat {machine_name} "
+                f"wordt niet ingepland."
+            )
+            return None
+        return start_window_dt, end_window_dt, has_date
+
+    def _planned_program_index(self, m: int, selected_index: int) -> int:
+        """Return the index of the program machine m's previous plan was made with.
+
+        Reads the program name from the optional 'entity calculated program'.
+        Falls back to selected_index, the program selected now, when no such
+        entity is configured, or, with a warning, when it cannot be read or
+        holds no known program name.
+        """
+        machine = self.machines[m]
+        entity_id = machine.entity_calculated_program
+        if entity_id is None:
+            return selected_index
+        try:
+            state = self.get_state(entity_id).state
+        except Exception as ex:
+            logging.warning(
+                f"Programma van de vorige planning van {machine.name} niet leesbaar "
+                f"uit {entity_id} ({ex}); het geselecteerde programma wordt gebruikt."
+            )
+            return selected_index
+        for index, program in enumerate(machine.programs):
+            if program.name == state:
+                return index
+        logging.warning(
+            f"Programma '{state}' in {entity_id} is geen programma van "
+            f"{machine.name}; voor de vorige planning wordt het geselecteerde "
+            f"programma gebruikt."
+        )
+        return selected_index
+
+    def _write_planned_program(self, m: int, program_name: str) -> None:
+        """Store the program of machine m's new plan in 'entity calculated program'.
+
+        Uses select_option for an input_select or select entity and set_value
+        otherwise (input_text). A failure is logged as a warning.
+        """
+        machine = self.machines[m]
+        entity_id = machine.entity_calculated_program
+        try:
+            if entity_id.split(".")[0] in ("input_select", "select"):
+                self.select_option(entity_id, program_name)
+            else:
+                self.set_value(entity_id, program_name)
+            logging.info(f"Programma {program_name} opgeslagen in {entity_id}")
+        except Exception as ex:
+            logging.warning(
+                f"Programma {program_name} van {machine.name} niet geschreven naar "
+                f"{entity_id}: {ex}"
+            )
+
+    def _reset_instant_start(self, m: int) -> None:
+        """Turn off the instant start entity of machine m.
+
+        Called once the run started by instant start has been planned and its
+        start written, so that later optimisations don't plan a new run as
+        soon as this one has ended. A failure is logged as a warning.
+        """
+        entity_id = self.machines[m].entity_instant_start
+        try:
+            self.turn_off(entity_id)
+            logging.info(f"Direct starten van {self.machines[m].name} uitgezet")
+        except Exception as ex:
+            logging.warning(
+                f"Direct starten van {self.machines[m].name} niet uitgezet "
+                f"({entity_id}): {ex}. Zet het zelf uit, anders wordt na afloop "
+                f"van deze run direct een nieuwe run ingepland."
+            )
 
     def _write_planned_datetime(
         self, entity_id: str, value: str, machine_name: str
@@ -3080,6 +3213,8 @@ class DaCalc(DaBase):
         ma_uur_kw = []  # per machine een list met beschikbare kwartieren
         ma_kw_dt = []  # per machine een list op welk tijdstip een kwartier begint
         program_index = []  # nummer in de lijst welk programma van een machine gaat draaien
+        # nummer van het programma waarmee de vorige planning is gemaakt
+        ma_planned_program_index = []
         ma_name = []  # naam van de machine
         # entity voor opvragen vorig en teruggeven berekend nieuw start-tijdstip
         ma_entity_plan_start = []
@@ -3114,6 +3249,11 @@ class DaCalc(DaBase):
             )
             program_index.append(p)
             RL.append(len(self.machines[m].programs[p].power))  # aantal stappen
+            ma_planned_program_index.append(self._planned_program_index(m, p))
+            # aantal kwartieren van de vorige planning
+            planned_rl = len(
+                self.machines[m].programs[ma_planned_program_index[m]].power
+            )
             entity_machine_instant_start = self.machines[m].entity_instant_start
             if entity_machine_instant_start is None:
                 machine_instant_start = False
@@ -3148,7 +3288,7 @@ class DaCalc(DaBase):
                 previous_plan = self._previous_plan(
                     prev_start_dt,
                     prev_end_dt,
-                    dt.timedelta(minutes=RL[m] * 15),
+                    dt.timedelta(minutes=planned_rl * 15),
                     ma_name[m],
                 )
                 if previous_plan is not None:
@@ -3158,38 +3298,35 @@ class DaCalc(DaBase):
             )  # de planning van de vorige geslaagde run
             ma_planned_end_dt.append(planned_end_dt)
             start_opt = start_dt  # now
-            # ready_ma_dt = uur[U - 1] # het laatste moment van planningshorizon
+            start_window_dt = start_opt
+            end_window_dt = start_opt
+            window_has_date = False
             if machine_instant_start:
                 start_window_dt = start_dt
                 end_window_dt = start_dt + dt.timedelta(minutes=RL[m] * 15)
             else:
-                if start_window_entity is None:
-                    logging.error(
-                        f"De 'entity start window' is niet gedefinieerd bij de instellingen "
-                        f"van {ma_name[m]}."
-                    )
-                    logging.error(f"Apparaat {ma_name[m]} wordt niet ingepland.")
+                window = self._read_machine_window(
+                    start_window_entity, end_window_entity, start_dt, ma_name[m]
+                )
+                if window is None:
                     error = True
                 else:
-                    start_window_hm = self.get_state(start_window_entity).state
-                    start_window_dt = convert_timestr(start_window_hm, start_dt)
-                if end_window_entity is None:
-                    logging.error(
-                        f"De 'entity end window' is niet gedefinieerd bij de instellingen "
-                        f"van {ma_name[m]}."
-                    )
-                    if not error:
-                        logging.error(f"Apparaat {ma_name[m]} wordt niet ingepland.")
-                        error = True
-                else:
-                    end_window_hm = self.get_state(end_window_entity).state
-                    end_window_dt = convert_timestr(end_window_hm, start_dt)
-            if end_window_dt < start_window_dt:
-                start_window_dt -= dt.timedelta(days=1)
-            if end_window_dt < start_opt:
-                start_window_dt += dt.timedelta(days=1)
-                end_window_dt += dt.timedelta(days=1)
-            if end_window_dt > tijd[U - 1]:
+                    start_window_dt, end_window_dt, window_has_date = window
+            if not error and not window_has_date:
+                # een window met alleen tijden ligt op de eerstvolgende dag
+                # waarop het nog niet voorbij is
+                if end_window_dt < start_window_dt:
+                    start_window_dt -= dt.timedelta(days=1)
+                if end_window_dt < start_opt:
+                    start_window_dt += dt.timedelta(days=1)
+                    end_window_dt += dt.timedelta(days=1)
+            if not error and window_has_date and end_window_dt <= start_opt:
+                error = True
+                logging.info(
+                    f"Machine {ma_name[m]} wordt niet ingepland, want "
+                    f"het planning-window ({end_window_dt}) is voorbij"
+                )
+            if not error and end_window_dt > tijd[U - 1]:
                 error = True
                 logging.info(
                     f"Machine {ma_name[m]} wordt niet ingepland, want "
@@ -3248,6 +3385,12 @@ class DaCalc(DaBase):
                             f"Machine {ma_name[m]} wordt niet ingepland, want "
                             f"er is te weinig tijd tussen nu en einde planning-window "
                             f"({end_window_dt}) "
+                        )
+                    elif window_has_date:
+                        error = True
+                        logging.info(
+                            f"Machine {ma_name[m]} wordt niet ingepland, want "
+                            f"het planning-window ({end_window_dt}) is voorbij"
                         )
                     else:
                         if end_window_dt + dt.timedelta(days=1) > tijd[U - 1]:
@@ -3311,7 +3454,7 @@ class DaCalc(DaBase):
             else:
                 delta = end_window_dt - max(start_opt, start_window_dt)
                 # aantal kwartieren in planningsperiode
-                kw_num = math.ceil(delta.seconds / 900)
+                kw_num = math.ceil(delta.total_seconds() / 900)
             KW.append(kw_num)
             if RL[m] == 0:
                 logging.info(
@@ -3440,7 +3583,12 @@ class DaCalc(DaBase):
                         c_ma_sum = 0
                         start_interval_dt = max(tijd[u], start_dt)
                         end_interval_dt = tijd[u] + dt.timedelta(seconds=step_s[u])
-                        for kw in range(RL[m]):
+                        planned_power = (
+                            self.machines[m]
+                            .programs[ma_planned_program_index[m]]
+                            .power
+                        )
+                        for kw in range(len(planned_power)):
                             start_kw_dt = ma_planned_start_dt[m] + dt.timedelta(
                                 minutes=kw * 15
                             )
@@ -3450,13 +3598,7 @@ class DaCalc(DaBase):
                             if start_overlap_dt < end_overlap_dt:
                                 verschil = end_overlap_dt - start_overlap_dt
                                 fraction = verschil.seconds / 900
-                                c_ma_sum += (
-                                    self.machines[m]
-                                    .programs[program_index[m]]
-                                    .power[kw]
-                                    * fraction
-                                    / 4000
-                                )
+                                c_ma_sum += planned_power[kw] * fraction / 4000
                         model += c_ma_u[m][u] == c_ma_sum
                     else:
                         model += c_ma_u[m][u] == 0
@@ -4809,6 +4951,22 @@ class DaCalc(DaBase):
                                         ma_entity_plan_end[m], end_machine_str, ma_name[m]
                                     ):
                                         logging.info(f"Is klaar op {end_machine_str}")
+                            if self.machines[m].entity_calculated_program is not None:
+                                if self.debug:
+                                    logging.info(
+                                        f"Programma {program_selected[m]} zou zijn "
+                                        f"opgeslagen"
+                                    )
+                                elif start_written:
+                                    self._write_planned_program(m, program_selected[m])
+                            if ma_instant_start[m]:
+                                if self.debug:
+                                    logging.info(
+                                        f"Direct starten van {ma_name[m]} zou zijn "
+                                        f"uitgezet"
+                                    )
+                                elif start_written:
+                                    self._reset_instant_start(m)
                     if start_machine_str == "":
                         logging.info("Niet ingepland")
 

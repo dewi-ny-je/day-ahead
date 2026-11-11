@@ -105,12 +105,42 @@ def get_value_from_dict(dag: str, options: dict) -> float:
     return result
 
 
-def convert_timestr(time_str: str, now_dt: datetime.datetime) -> datetime.datetime:
-    result_hm = datetime.datetime.strptime(time_str, "%H:%M:%S")
-    result = datetime.datetime(
-        now_dt.year, now_dt.month, now_dt.day, result_hm.hour, result_hm.minute
-    )
-    return result
+def parse_window_state(
+    state: str, now_dt: datetime.datetime
+) -> tuple[datetime.datetime, bool]:
+    """Convert the state of a time window entity to a naive local datetime.
+
+    Accepts a time of day ("18:00:00" or "18:00", the state of an
+    input_datetime with only a time), which is placed on the day of now_dt,
+    and a full date and time ("2026-11-08 18:00:00", the state of an
+    input_datetime with date and time, or the ISO state of a datetime entity
+    such as "2026-11-08T17:00:00+00:00"). A time zone offset is converted to
+    the local time zone, the zone of now_dt.
+
+    Returns the datetime and True when the state holds a date, False when it
+    holds only a time of day. Raises ValueError for any other state, such as
+    "unknown" or "unavailable".
+    """
+    state = state.strip()
+    try:
+        time_of_day = datetime.time.fromisoformat(state)
+    except ValueError:
+        pass
+    else:
+        return (
+            datetime.datetime(
+                now_dt.year,
+                now_dt.month,
+                now_dt.day,
+                time_of_day.hour,
+                time_of_day.minute,
+            ),
+            False,
+        )
+    result = datetime.datetime.fromisoformat(state)
+    if result.tzinfo is not None:
+        result = result.astimezone().replace(tzinfo=None)
+    return result, True
 
 
 def get_tibber_data():

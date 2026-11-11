@@ -18,6 +18,24 @@
     }
   },
   {
+    "id": "machine-window-with-date",
+    "description": "Vaatwasser window given as states with a date and time (input_datetime with date) instead of a time of day - it must run in that window just as with times only",
+    "start": "2026-01-14 00:00",
+    "prices": {
+      "cons": [0.30, 0.30, 0.05, 0.05, 0.30, 0.30, 0.30, 0.45, 0.45, 0.30, 0.30, 0.30,
+               0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30]
+    },
+    "states": {
+      "input_datetime.start_window_vaatwasser": "2026-01-14 07:00:00",
+      "input_datetime.end_window_vaatwasser": "2026-01-14 09:00:00"
+    },
+    "expect": {
+      "solved": true,
+      "objective_within_baseline": true,
+      "machine_runs_in_window": { "machine": "vaatwasser", "start": "07:00", "end": "09:00", "runs": true }
+    }
+  },
+  {
     "id": "machine-slack-window-picks-cheap",
     "description": "Wasmachine (1.5h program) keeps its wide default window - free to roam, it schedules itself into the one cheap afternoon trough",
     "start": "2026-01-14 00:00",
