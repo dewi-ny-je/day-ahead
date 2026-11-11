@@ -642,7 +642,7 @@ Home Assistant entity for the earliest allowed start. Machine can start any time
 
 **`entity end window`**
 
-Home Assistant entity for the latest allowed completion. Machine must finish before this deadline. A time of day (e.g. 08:00) or a date and time, like the start window. A window with a date must end after its start.
+Home Assistant entity for the latest allowed completion. Machine must finish before this deadline. A time of day (e.g. 08:00) or a date and time, like the start window. A window with a date must end after its start. When only one of the two has a date, the time of day of the other is taken relative to it (e.g. start 2026-11-10 20:00 with end 07:00 ends on 2026-11-11 07:00).
 
 **`entity selected program`**
 

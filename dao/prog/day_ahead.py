@@ -166,8 +166,9 @@ class DaCalc(DaBase):
         Each entity may hold a time of day or a full date and time (see
         parse_window_state). Returns (start, end, has_date), where has_date is
         True when at least one of the two holds a date; the window is then
-        used as it is, and a time of day in the other entity lies on the day
-        of now_dt. Returns None, after logging why, when an entity is not
+        used as it is. A time of day next to a date is placed relative to
+        that date: an end on the first day it falls after the start, a start
+        on the last day it falls before the end. Returns None, after logging why, when an entity is not
         configured, cannot be read or holds no valid value, or when a window
         with a date does not end after its start.
         """
@@ -194,6 +195,20 @@ class DaCalc(DaBase):
                 )
                 return None
         (start_window_dt, start_has_date), (end_window_dt, end_has_date) = result
+        if start_has_date and not end_has_date:
+            # de eindtijd ligt op de eerste dag waarop die na het begin valt
+            end_window_dt = dt.datetime.combine(
+                start_window_dt.date(), end_window_dt.time()
+            )
+            if end_window_dt <= start_window_dt:
+                end_window_dt += dt.timedelta(days=1)
+        elif end_has_date and not start_has_date:
+            # de begintijd ligt op de laatste dag waarop die voor het einde valt
+            start_window_dt = dt.datetime.combine(
+                end_window_dt.date(), start_window_dt.time()
+            )
+            if start_window_dt >= end_window_dt:
+                start_window_dt -= dt.timedelta(days=1)
         has_date = start_has_date or end_has_date
         if has_date and end_window_dt <= start_window_dt:
             logging.error(

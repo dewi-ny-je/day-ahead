@@ -320,3 +320,29 @@ def test_failed_write_of_planned_program_warns(caplog):
         calc._write_planned_program(0, "eco")
 
     assert "input_text.wm_program" in caplog.text
+
+
+def test_machine_window_time_only_end_follows_a_dated_start():
+    calc = _Calc(
+        {
+            "input_datetime.wm_from": "2026-11-12 20:00:00",
+            "input_datetime.wm_until": "07:00:00",
+        }
+    )
+
+    assert calc._read_machine_window(
+        "input_datetime.wm_from", "input_datetime.wm_until", NOW, "wm"
+    ) == (dt.datetime(2026, 11, 12, 20), dt.datetime(2026, 11, 13, 7), True)
+
+
+def test_machine_window_time_only_start_precedes_a_dated_end():
+    calc = _Calc(
+        {
+            "input_datetime.wm_from": "22:00:00",
+            "input_datetime.wm_until": "2026-11-12 06:00:00",
+        }
+    )
+
+    assert calc._read_machine_window(
+        "input_datetime.wm_from", "input_datetime.wm_until", NOW, "wm"
+    ) == (dt.datetime(2026, 11, 11, 22), dt.datetime(2026, 11, 12, 6), True)
