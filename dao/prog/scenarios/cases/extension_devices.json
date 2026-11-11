@@ -1,0 +1,144 @@
+[
+  {
+    "id": "extension-boiler-hourly-tail",
+    "description": "Boiler at its setpoint, cooling 0.1 K/h, on 10 h of quarter-hour prices plus a 14 h hourly predicted tail. Every tail step cools the boiler by a whole hour, so it must be heated before it drops below the hysteresis about 20 h in, in the tail",
+    "start": "2026-10-07 14:00",
+    "prices": {
+      "cons": [
+        0.24,
+        0.26,
+        0.29,
+        0.33,
+        0.36,
+        0.37,
+        0.34,
+        0.29,
+        0.25,
+        0.23
+      ],
+      "predicted": {
+        "cons": [
+          0.22,
+          0.21,
+          0.21,
+          0.2,
+          0.21,
+          0.23,
+          0.27,
+          0.31,
+          0.3,
+          0.27,
+          0.08,
+          -0.02,
+          0.33,
+          0.36
+        ]
+      }
+    },
+    "states": {
+      "sensor.ess_battery_soc": "50",
+      "sensor.boiler_gemeten": "50"
+    },
+    "expect": {
+      "solved": true,
+      "objective_within_baseline": true
+    },
+    "config_patch": {
+      "boiler.cooling_rate": 0.1,
+      "boiler.heating_allowed_below": 49.5
+    }
+  },
+  {
+    "id": "extension-heatpump-power-blocks-hourly-tail",
+    "description": "Power-mode heat pump with a 2 h minimum run length on 10 h of quarter-hour prices plus a 14 h hourly predicted tail. A block's length is counted in hours, so a block in the tail spans whole-hour steps",
+    "start": "2026-10-07 14:00",
+    "prices": {
+      "cons": [
+        0.24,
+        0.26,
+        0.29,
+        0.33,
+        0.36,
+        0.37,
+        0.34,
+        0.29,
+        0.25,
+        0.23
+      ],
+      "predicted": {
+        "cons": [
+          0.22,
+          0.21,
+          0.21,
+          0.2,
+          0.21,
+          0.23,
+          0.27,
+          0.31,
+          0.3,
+          0.27,
+          0.08,
+          -0.02,
+          0.33,
+          0.36
+        ]
+      }
+    },
+    "temp": [
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0,
+      9.0
+    ],
+    "states": {
+      "sensor.ess_battery_soc": "50",
+      "binary_sensor.heatpump_heating": "on"
+    },
+    "config_patch": {
+      "boiler.boiler_present": false,
+      "heating.min_run_length": 2,
+      "heating.stages": [
+        {
+          "max_power": 0,
+          "cop": 8.0
+        },
+        {
+          "max_power": 450,
+          "cop": 4.4
+        },
+        {
+          "max_power": 800,
+          "cop": 4.4
+        },
+        {
+          "max_power": 1250,
+          "cop": 3.9
+        }
+      ]
+    },
+    "expect": {
+      "solved": true,
+      "objective_within_baseline": true
+    }
+  }
+]

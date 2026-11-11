@@ -25,6 +25,8 @@ from utils import (
     error_handling,
     interpolate,
     power_weighted_efficiency,
+    steps_covering_hours,
+    steps_until_cooled,
 )
 
 from dao.prog import da_calc_graph, da_task_queue
@@ -99,6 +101,74 @@ class DaCalc(DaBase):
         self.grid = self.config.grid
         self.machines = self.config.machines
         # self.start_logging()
+
+    def _read_planned_datetime(
+        self, entity_id: str | None, machine_name: str
+    ) -> dt.datetime | None:
+        """Return the datetime stored in a machine's calculated start/end entity.
+
+        Returns None when no entity is configured, or when the entity cannot be
+        read or holds no valid "%Y-%m-%d %H:%M:%S" value; in the last two cases
+        a warning is logged and the machine is planned as if it has no previous
+        plan.
+        """
+        if entity_id is None:
+            return None
+        try:
+            state = self.get_state(entity_id).state
+            return dt.datetime.strptime(state, "%Y-%m-%d %H:%M:%S")
+        except Exception as ex:
+            logging.warning(
+                f"Vorige planning van {machine_name} niet leesbaar uit "
+                f"{entity_id} ({ex}); er wordt gepland zonder vorige planning. "
+                f"Maak een input_datetime (met datum en tijd) aan voor {entity_id}."
+            )
+            return None
+
+    @staticmethod
+    def _previous_plan(
+        prev_start_dt: dt.datetime | None,
+        prev_end_dt: dt.datetime | None,
+        run_length: dt.timedelta,
+        machine_name: str,
+    ) -> tuple[dt.datetime, dt.datetime] | None:
+        """Combine the stored start and end of a machine's previous plan.
+
+        A missing time is derived from the other one and the run length. An end
+        that is not after the start does not belong to the same plan as the
+        start, so the end is derived from the start instead. Returns None when
+        neither time is known.
+        """
+        if prev_start_dt is None:
+            if prev_end_dt is None:
+                return None
+            return prev_end_dt - run_length, prev_end_dt
+        if prev_end_dt is not None and prev_end_dt <= prev_start_dt:
+            logging.warning(
+                f"Opgeslagen eindtijd {prev_end_dt} van {machine_name} ligt niet na "
+                f"de starttijd {prev_start_dt}; de eindtijd wordt berekend uit de "
+                f"starttijd."
+            )
+            prev_end_dt = None
+        if prev_end_dt is None:
+            prev_end_dt = prev_start_dt + run_length
+        return prev_start_dt, prev_end_dt
+
+    def _write_planned_datetime(
+        self, entity_id: str, value: str, machine_name: str
+    ) -> bool:
+        """Write a calculated start/end time with the set_datetime service.
+
+        Returns False and logs a warning when the service call fails.
+        """
+        try:
+            self.call_service("set_datetime", entity_id=entity_id, datetime=value)
+            return True
+        except Exception as ex:
+            logging.warning(
+                f"Planning van {machine_name} niet geschreven naar {entity_id}: {ex}"
+            )
+            return False
 
     def calc_optimum(
         self,
@@ -337,6 +407,9 @@ class DaCalc(DaBase):
         pv_org_dc = []
         hour_fraction = []
         interval_fraction = []
+        # nominale lengte van iedere stap in seconden: self.interval_s, of een
+        # heel uur in de staart met voorspelde prijzen
+        step_s = []
         first_interval = True
 
         """
@@ -437,12 +510,15 @@ class DaCalc(DaBase):
                 ts.append(start_ts)
                 hour_fraction.append(hour_fraction_first_interval)
                 interval_fraction.append(interval_fraction_first_interval)
+                step_s.append(self.interval_s)
             else:
                 ts.append(row.time)
                 if horizon_extension > 0 and row.tijd>= start_prediction_dt:
                     hour_fraction.append(1)
+                    step_s.append(3600)
                 else:
                     hour_fraction.append(self.interval_s / 3600)
+                    step_s.append(self.interval_s)
                 interval_fraction.append(1)
             for s in range(solar_num):
                 solar_name = self.solar[s].name.replace(" ", "_").replace("-", "_")
@@ -465,6 +541,14 @@ class DaCalc(DaBase):
                     pv_total += prod
             pv_org_dc.append(pv_total)
             first_interval = False
+        while len(step_s) < U:
+            step_s.append(step_s[-1] if step_s else self.interval_s)
+        # nominale lengte van iedere stap in uren en het aantal uren tot het
+        # begin van iedere stap (cum_h[U] is de hele horizon)
+        step_h = [s_ / 3600 for s_ in step_s]
+        cum_h = [0.0]
+        for u in range(U):
+            cum_h.append(cum_h[-1] + step_h[u])
 
         while len(b_l) > len(uur):
             b_l = b_l[:-1]
@@ -472,11 +556,15 @@ class DaCalc(DaBase):
             b_l.append(b_l[-1])
         # p_avg1 = sum(pl) / U  # max(pl) #
         sum_w_prices = 0
+        sum_w_prices_t = 0
         sum_hf = 0
         for u in range(U):
             sum_w_prices += pl[u] * hour_fraction[u]
+            sum_w_prices_t += pt[u] * hour_fraction[u]
             sum_hf += hour_fraction[u]
         p_avg = sum_w_prices/sum_hf
+        # time-weighted average feed-in price over the horizon
+        p_avg_t = sum_w_prices_t / sum_hf
         for _u in range(U):
             pl_avg.append(p_avg)
 
@@ -1344,7 +1432,9 @@ class DaCalc(DaBase):
                 self.ha_getter
             )  # FlexFloat
             logging.info(f"Boiler cooling rate {cooling_rate} K/uur")
-            boiler_cooling = cooling_rate * self.interval_s / 3600
+            # afkoeling per stap en totale afkoeling tot het begin van iedere stap
+            boiler_cooling = [cooling_rate * step_h[u] for u in range(U)]
+            cum_cooling = [cooling_rate * h for h in cum_h]
 
             # 45 °C grens daaronder kan worden verwarmd
             boiler_bovengrens = self.boiler_options.heating_allowed_below.resolve(
@@ -1377,15 +1467,15 @@ class DaCalc(DaBase):
                 self.boiler_options.elec_power
             )
             boiler_heated_by_heatpump = self.boiler_options.boiler_heated_by_heatpump
-            # delta t in een step
-            # heat rate = power * cop * sec.p.interval /spec vermogen in K/step
-            heat_rate = (
-                power_boiler * cop_boiler * self.interval_s / (spec_heat_boiler * 1000)
-            )
+            # opwarming in K per uur = power * cop * 3600 / spec vermogen
+            heat_rate_h = power_boiler * cop_boiler * 3600 / (spec_heat_boiler * 1000)
             boiler_end_temp = max(
-                boiler_ondergrens, boiler_act_temp - U * boiler_cooling
+                boiler_ondergrens, boiler_act_temp - cum_cooling[U]
             )
-            max_steps = math.ceil((boiler_setpoint - boiler_end_temp) / heat_rate)
+            # aantal stappen aan het eind van de horizon dat nodig is om op te warmen
+            max_steps = steps_covering_hours(
+                step_h[::-1], 0, (boiler_setpoint - boiler_end_temp) / heat_rate_h
+            )
             # interval-index waarop boiler kan worden verwarmd
             if boiler_instant_start or (boiler_act_temp <= boiler_ondergrens):
                 boiler_start_index = 0
@@ -1396,8 +1486,8 @@ class DaCalc(DaBase):
                         0,
                         min(
                             U - 1 - max_steps,
-                            math.floor(
-                                (boiler_act_temp - boiler_bovengrens) / boiler_cooling
+                            steps_until_cooled(
+                                cum_cooling, boiler_act_temp - boiler_bovengrens
                             ),
                         ),
                     )
@@ -1405,7 +1495,7 @@ class DaCalc(DaBase):
 
             # interval-index waarop boiler nog aan kan
             # (41-40)/0.4=2.5
-            boiler_end_temp = boiler_act_temp - U * boiler_cooling
+            boiler_end_temp = boiler_act_temp - cum_cooling[U]
             if boiler_instant_start or (boiler_act_temp <= boiler_ondergrens):
                 boiler_end_index = 1
             else:
@@ -1414,8 +1504,8 @@ class DaCalc(DaBase):
                         U - max_steps,
                         max(
                             boiler_start_index + 1,
-                            math.floor(
-                                (boiler_act_temp - boiler_ondergrens) / boiler_cooling
+                            steps_until_cooled(
+                                cum_cooling, boiler_act_temp - boiler_ondergrens
                             ),
                         ),
                     )
@@ -1443,14 +1533,14 @@ class DaCalc(DaBase):
                 model += xsum(boiler_on[j] for j in range(U)) == 0
                 model += xsum(boiler_st[j] for j in range(U)) == 0
                 logging.debug("Boiler: er  wordt geen opwarming inpland")
-                boiler_end_temp = boiler_act_temp - boiler_cooling * U
+                boiler_end_temp = boiler_act_temp - cum_cooling[U]
                 logging.debug(
                     f"Boiler eind temperatuur zonder opwarmen: {boiler_end_temp:.2f}"
                 )
                 model += boiler_temp[0] == boiler_act_temp
                 for u in range(U):
                     # opwarming in K = kWh opwarming * 3600 = kJ / spec heat boiler - 3
-                    model += boiler_temp[u + 1] == boiler_temp[u] - boiler_cooling
+                    model += boiler_temp[u + 1] == boiler_temp[u] - boiler_cooling[u]
             else:
                 logging.info(
                     f"Boiler opwarmen wordt ingepland tussen: "
@@ -1458,7 +1548,7 @@ class DaCalc(DaBase):
                     f"{tijd[min(boiler_end_index, U - 1)].strftime('%Y-%m-%d %H:%M')}"
                 )
                 est_boiler_temp = [
-                    (boiler_act_temp - boiler_cooling * u) for u in range(U)
+                    (boiler_act_temp - cum_cooling[u]) for u in range(U)
                 ]
                 est_needed_heat = [0.0 for _ in range(U)]
                 est_needed_elec = [0.0 for _ in range(U)]
@@ -1471,12 +1561,12 @@ class DaCalc(DaBase):
                 # needed_time = [0 for _ in range(U)]
                 # needed_heat = sp * (setpoint - act_temp - 4 - cooling*plan_periode)/3600 in kWh
 
-                # consumption in one interval = kWh per uur of per 15min
-                cons_interval = power_boiler * self.interval_s / 3600000
+                # verbruik in kWh in een hele stap
+                cons_interval = [power_boiler * step_s[u] / 3600000 for u in range(U)]
                 # tempverlies door menging bij starten opwarmen in K
                 # mix_los = 1.2
                 logging.info(
-                    f"Boiler verbruik in 1 {self.interval_name}: {cons_interval} kWh"
+                    f"Boiler verbruik in 1 {self.interval_name}: {cons_interval[0]} kWh"
                 )
                 boiler_netto_cost = None
                 for u in range(U):
@@ -1496,10 +1586,8 @@ class DaCalc(DaBase):
                         start_needed_elec + est_needed_heat[u] / cop_boiler
                     )
                     # benodigde aantallen intervallen
-                    num_intervals = math.ceil(
-                        (est_needed_elec[u] * 1000 / power_boiler)
-                        * 3600
-                        / self.interval_s
+                    num_intervals = steps_covering_hours(
+                        step_h, u, est_needed_elec[u] * 1000 / power_boiler
                     )
                     # verdelen van benodigde elektra over de intervallen
                     est_needed_intv[u] = num_intervals
@@ -1511,7 +1599,8 @@ class DaCalc(DaBase):
                     for j in range(num_intervals + 1):
                         use = min(
                             max(0, est_needed_elec[u] - used),
-                            cons_interval * interval_fraction[min(u + j, U - 1)],
+                            cons_interval[min(u + j, U - 1)]
+                            * interval_fraction[min(u + j, U - 1)],
                         )
                         est_elec_cost[u] += use * pl[min(u + j, U - 1)]
                         est_needed_elec_st[u].append(use)
@@ -1520,8 +1609,8 @@ class DaCalc(DaBase):
                         used += use
                         if used >= est_needed_elec[u]:
                             break
-                    est_boiler_endtemp[u] = boiler_setpoint - boiler_cooling * (
-                        U - u - est_needed_intv[u]
+                    est_boiler_endtemp[u] = boiler_setpoint - (
+                        cum_cooling[U] - cum_cooling[min(U, u + est_needed_intv[u])]
                     )
                     est_boiler_endvalue[u] = (
                         (est_boiler_endtemp[u] - boiler_act_temp)  # boiler_ondergrens)
@@ -1565,8 +1654,8 @@ class DaCalc(DaBase):
 
                 # c_b = consumption boiler in kWh per interval
                 c_b = [
-                    model.add_var(var_type=CONTINUOUS, lb=0, ub=cons_interval)
-                    for _ in range(U)
+                    model.add_var(var_type=CONTINUOUS, lb=0, ub=cons_interval[u])
+                    for u in range(U)
                 ]
                 model += xsum(boiler_st[u] for u in range(U)) == 1
 
@@ -1693,7 +1782,7 @@ class DaCalc(DaBase):
                         boiler_temp[u + 1]
                         == boiler_temp[u]
                         # - mix_los * boiler_st[u]
-                        - boiler_cooling
+                        - boiler_cooling[u]
                         + c_b[u] * cop_boiler * 3600 / spec_heat_boiler
                     )
 
@@ -1799,7 +1888,7 @@ class DaCalc(DaBase):
             if instant_charge:
                 # instant charge has no real deadline, so bound hours_avail by the
                 # planning horizon instead of the (possibly stale) configured ready time
-                horizon_end = tijd[U - 1] + dt.timedelta(seconds=self.interval_s)
+                horizon_end = tijd[U - 1] + dt.timedelta(seconds=step_s[U - 1])
                 hours_avail = max(0, (horizon_end - start_dt).total_seconds() / 3600)
             # model_dump() is required here: after building the list, two computed
             # keys ("power" and "accu_power") are injected into each dict at runtime
@@ -1897,10 +1986,8 @@ class DaCalc(DaBase):
             old_ampere_state = self.get_state(
                 self.ev_options[e].entity_set_charging_ampere
             ).state
-            # afgerond naar boven in hele uren
-            int_needed = math.ceil(
-                time_needed if self.interval == "1hour" else time_needed * 4
-            )
+            # afgerond naar boven in hele stappen
+            int_needed = steps_covering_hours(step_h, 0, time_needed)
             intervals_needed.append(int_needed)
             logging.info(
                 f"Afgerond naar hele intervallen: {intervals_needed[e]} "
@@ -1937,7 +2024,7 @@ class DaCalc(DaBase):
                     ready_index = max(0, intervals_needed[e] - 1)
                 else:
                     for u in range(U):
-                        if (tijd[u] + dt.timedelta(seconds=self.interval_s)) >= ready:
+                        if (tijd[u] + dt.timedelta(seconds=step_s[u])) >= ready:
                             ready_index = u
                             break
             if ready_index == U:
@@ -2440,11 +2527,11 @@ class DaCalc(DaBase):
             if self.hp_adjustment == "on/off":
                 hp_hours = 0
                 interval_avail = U - boiler_int - 1
-                hours_avail = math.floor(interval_avail * self.interval_s / 3600)
+                hours_avail = math.floor(cum_h[max(0, interval_avail)])
                 logging.info(f"Beschikbaar zijn: {hours_avail} uur")
                 if heat_needed > 0:
                     logging.info("On/off warmtepomp wordt ingepland")
-                    avg_temp_today = self.meteo.get_avg_temperature(date=calc_day)
+                    avg_temp_today = self.meteo.get_avg_temperature(calc_day)
                     logging.info(
                         f"Gem. buitentemperatuur vandaag: {avg_temp_today:.1f} °C"
                     )
@@ -2749,7 +2836,7 @@ class DaCalc(DaBase):
                 logging.info(
                     f"Minimaal warmteproducerend vermogen: {min_heat_power:.2f} kW"
                 )
-                hours_avail = (U - boiler_int) * self.interval_s / 3600
+                hours_avail = cum_h[max(0, U - boiler_int)]
                 logging.info(f"Aantal beschikbare uren: {hours_avail:.2f}")
                 logging.info(
                     f"Maximaal te produceren hoeveelheid warmte: {max_heat_prod:.1f} kWh"
@@ -2883,19 +2970,11 @@ class DaCalc(DaBase):
                 xsum(hp_on[u] for u in range(U)) == run_length
                 """
 
-                # alles omzetten naar het goede interval:
-                block_len = []
-                # eerste blok
-                block_len.append(int(first_block_len * 3600 / self.interval_s))
-                # tussenliggende blokken
+                # blokken in uren: eerste, tussenliggende en laatste blok
+                block_h = [first_block_len]
                 for _ in range(blocks_num)[1:-1]:
-                    block_len.append(int(min_run_length * 3600 / self.interval_s))
-                # laatste
-                block_len.append(int(last_block_len * 3600 / self.interval_s))
-
-                # constraint 1
-                # A−t ≤ (tmax−t)(1−Xt) for all t
-                # "vertaald": hp_start_index − u ≤ (U−u) * (1−hp_on[u]) for all u
+                    block_h.append(min_run_length)
+                block_h.append(last_block_len)
 
                 hp_bl_on = [
                     [model.add_var(var_type=BINARY) for _ in range(U)]
@@ -2905,37 +2984,81 @@ class DaCalc(DaBase):
                     model.add_var(var_type=INTEGER, lb=0, ub=U - 1)
                     for _ in range(blocks_num)
                 ]
-                if first_block_start is not None:
-                    model += (
-                        hp_start_index[0] == first_block_start * 3600 / self.interval_s
-                    )
-                for j in range(blocks_num):
-                    for u in range(U):
-                        model += (hp_start_index[j] - u) <= (U - u) * (
-                            1 - hp_bl_on[j][u]
+                if len(set(step_s)) == 1:
+                    # alle stappen even lang: een blok is een vast aantal stappen
+                    block_len = [int(h * 3600 / step_s[0]) for h in block_h]
+                    if first_block_start is not None:
+                        model += hp_start_index[0] == steps_covering_hours(
+                            step_h, 0, first_block_start
                         )
 
-                # constraint 2
-                # t−(A+P) ≤ t(1−Xt) for all t
-                # "vertaald": u−(hp_start_index+run_length-1) ≤ u * (1−hp_bl_on[u]) for all u
-                for j in range(blocks_num):
-                    for u in range(U):
-                        model += (u - (hp_start_index[j] + block_len[j] - 1)) <= (
-                            U * (1 - hp_bl_on[j][u])
+                    # constraint 1
+                    # A−t ≤ (tmax−t)(1−Xt) for all t
+                    # "vertaald": hp_start_index − u ≤ (U−u) * (1−hp_on[u]) for all u
+                    for j in range(blocks_num):
+                        for u in range(U):
+                            model += (hp_start_index[j] - u) <= (U - u) * (
+                                1 - hp_bl_on[j][u]
+                            )
+
+                    # constraint 2
+                    # t−(A+P) ≤ t(1−Xt) for all t
+                    # "vertaald": u−(hp_start_index+run_length-1) ≤ u * (1−hp_bl_on[u]) for all u
+                    for j in range(blocks_num):
+                        for u in range(U):
+                            model += (u - (hp_start_index[j] + block_len[j] - 1)) <= (
+                                U * (1 - hp_bl_on[j][u])
+                            )
+
+                    # constraint 3
+                    # ∑tXt = P+1
+                    # "vertaald": xsum(hp_on[u] for all u) == min_run_length
+                    for j in range(blocks_num):
+                        model += xsum(hp_bl_on[j][u] for u in range(U)) == block_len[j]
+
+                    # aanvullend
+                    # Constraint 4: blocks mogen niet overlappen
+                    for j in range(blocks_num)[1:]:
+                        model += (
+                            hp_start_index[j - 1] + block_len[j - 1] <= hp_start_index[j]
                         )
-
-                # constraint 3
-                # ∑tXt = P+1
-                # "vertaald": xsum(hp_on[u] for all u) == min_run_length
-                for j in range(blocks_num):
-                    model += xsum(hp_bl_on[j][u] for u in range(U)) == block_len[j]
-
-                # aanvullend
-                # Constraint 4: blocks mogen niet overlappen
-                for j in range(blocks_num)[1:]:
-                    model += (
-                        hp_start_index[j - 1] + block_len[j - 1] <= hp_start_index[j]
-                    )
+                else:
+                    # stappen van ongelijke lengte (kwartieren en daarna hele uren in
+                    # de staart): een blok is een aaneengesloten reeks stappen die
+                    # samen minstens block_h uur beslaat, en hooguit zoveel meer als
+                    # het verschil tussen de langste en de kortste stap
+                    hp_bl_st = [
+                        [model.add_var(var_type=BINARY) for _ in range(U)]
+                        for _ in range(blocks_num)
+                    ]
+                    slack_h = max(step_h) - min(step_h)
+                    for j in range(blocks_num):
+                        # precies een begin per blok, en het begin van het blok
+                        # bepaalt de startindex
+                        model += xsum(hp_bl_st[j][u] for u in range(U)) == 1
+                        model += hp_start_index[j] == xsum(
+                            u * hp_bl_st[j][u] for u in range(U)
+                        )
+                        for u in range(U):
+                            # aan alleen als het vorige interval aan was of het blok
+                            # hier begint
+                            prev_on = hp_bl_on[j][u - 1] if u > 0 else 0
+                            model += hp_bl_on[j][u] <= prev_on + hp_bl_st[j][u]
+                            model += hp_bl_st[j][u] <= hp_bl_on[j][u]
+                        block_hours = xsum(hp_bl_on[j][u] * step_h[u] for u in range(U))
+                        model += block_hours >= block_h[j]
+                        model += block_hours <= block_h[j] + slack_h
+                    if first_block_start is not None:
+                        model += hp_start_index[0] == steps_covering_hours(
+                            step_h, 0, first_block_start
+                        )
+                    # blokken mogen niet overlappen
+                    for j in range(blocks_num)[1:]:
+                        model += (
+                            hp_start_index[j - 1]
+                            + xsum(hp_bl_on[j - 1][u] for u in range(U))
+                            <= hp_start_index[j]
+                        )
 
                 for u in range(U):
                     # constraint 5: hp_bl_on -> hp_on
@@ -3009,31 +3132,27 @@ class DaCalc(DaBase):
                 start_dt.year, start_dt.month, start_dt.day
             ) - dt.timedelta(days=1)
             planned_end_dt = planned_start_dt
-            if ma_entity_plan_start[m] is None:
-                if ma_entity_plan_end[m] is None:
-                    error = True
-                    logging.error(
-                        f"Er zijn geen entities voor doorgeven van de planning gedefinieerd "
-                        f"bij de instellingen van {ma_name[m]}."
-                    )
-                else:
-                    planned_end_str = self.get_state(ma_entity_plan_end[m]).state
-                    planned_end_dt = dt.datetime.strptime(
-                        planned_end_str, "%Y-%m-%d %H:%M:%S"
-                    )
-                    planned_start_dt = planned_end_dt - dt.timedelta(minutes=RL[m] * 15)
-            else:
-                planned_start_str = self.get_state(ma_entity_plan_start[m]).state
-                planned_start_dt = dt.datetime.strptime(
-                    planned_start_str, "%Y-%m-%d %H:%M:%S"
+            if ma_entity_plan_start[m] is None and ma_entity_plan_end[m] is None:
+                error = True
+                logging.error(
+                    f"Er zijn geen entities voor doorgeven van de planning gedefinieerd "
+                    f"bij de instellingen van {ma_name[m]}."
                 )
-                if ma_entity_plan_end[m] is not None:
-                    planned_end_str = self.get_state(ma_entity_plan_end[m]).state
-                    planned_end_dt = dt.datetime.strptime(
-                        planned_end_str, "%Y-%m-%d %H:%M:%S"
-                    )
-                else:
-                    planned_end_dt = planned_start_dt + dt.timedelta(minutes=RL[m] * 15)
+            else:
+                prev_start_dt = self._read_planned_datetime(
+                    ma_entity_plan_start[m], ma_name[m]
+                )
+                prev_end_dt = self._read_planned_datetime(
+                    ma_entity_plan_end[m], ma_name[m]
+                )
+                previous_plan = self._previous_plan(
+                    prev_start_dt,
+                    prev_end_dt,
+                    dt.timedelta(minutes=RL[m] * 15),
+                    ma_name[m],
+                )
+                if previous_plan is not None:
+                    planned_start_dt, planned_end_dt = previous_plan
             ma_planned_start_dt.append(
                 planned_start_dt
             )  # de planning van de vorige geslaagde run
@@ -3315,14 +3434,12 @@ class DaCalc(DaBase):
                     if (
                         # het verbruik uit een eerdere planning berekenen en meenemen
                         ma_planned_start_dt[m]
-                        < (tijd[u] + dt.timedelta(minutes=int(self.interval_s / 60)))
+                        < (tijd[u] + dt.timedelta(seconds=step_s[u]))
                         and ma_planned_end_dt[m] > tijd[u]
                     ):
                         c_ma_sum = 0
                         start_interval_dt = max(tijd[u], start_dt)
-                        end_interval_dt = tijd[u] + dt.timedelta(
-                            minutes=int(self.interval_s / 60)
-                        )
+                        end_interval_dt = tijd[u] + dt.timedelta(seconds=step_s[u])
                         for kw in range(RL[m]):
                             start_kw_dt = ma_planned_start_dt[m] + dt.timedelta(
                                 minutes=kw * 15
@@ -3416,7 +3533,7 @@ class DaCalc(DaBase):
         if self.salderen:
             p_bat = p_avg
         else:
-            p_bat = sum(pt) / U
+            p_bat = p_avg_t
 
         # alles in kWh * prijs = kosten in euro
         model += cost == (
@@ -3602,10 +3719,11 @@ class DaCalc(DaBase):
             if blocks_num > 0:
                 logging.info("Blokken:")
             for j in range(blocks_num):
+                bl_steps = round(sum(hp_bl_on[j][u].x for u in range(U)))
                 logging.info(
                     f"Bloknr {j} start {int(hp_start_index[j].x)} "
-                    f"lengte {block_len[j]}"
-                    f" laatste {int(hp_start_index[j].x) + block_len[j] - 1}"
+                    f"lengte {bl_steps}"
+                    f" laatste {int(hp_start_index[j].x) + bl_steps - 1}"
                 )
             logging.info("u   uur   tar    hp_s_on hp_on heat cons")
             for u in range(U):
@@ -4133,7 +4251,7 @@ class DaCalc(DaBase):
                 if start_ev_laden is not None:
                     if stop_ev_laden is None:
                         stop_ev_laden = tijd[U - 1] + dt.timedelta(
-                            seconds=self.interval_s
+                            seconds=step_s[U - 1]
                         )
                     logging.info(
                         f"{self.ev_options[e].name} wordt geladen tussen "
@@ -4552,7 +4670,7 @@ class DaCalc(DaBase):
                     # no activity anywhere in the horizon: confirmed idle
                     # until the end of the horizon
                     next_action_dt = tijd[U - 1] + dt.timedelta(
-                        seconds=self.interval_s
+                        seconds=step_s[U - 1]
                     )
                 next_action_str = next_action_dt.strftime("%Y-%m-%d %H:%M")
                 if found_u is not None:
@@ -4662,31 +4780,35 @@ class DaCalc(DaBase):
                             else:
                                 ma_start_time = ma_kw_dt[m][r]
                             start_machine_str = ma_start_time.strftime("%Y-%m-%d %H:%M")
+                            start_written = True
                             if ma_entity_plan_start[m] is not None:
                                 if self.debug:
                                     logging.info(
                                         f"Zou zijn gestart op {start_machine_str}"
                                     )
                                 else:
-                                    self.call_service(
-                                        "set_datetime",
-                                        entity_id=ma_entity_plan_start[m],
-                                        datetime=start_machine_str,
+                                    start_written = self._write_planned_datetime(
+                                        ma_entity_plan_start[m], start_machine_str, ma_name[m]
                                     )
-                                    logging.info(f"Start op {start_machine_str}")
+                                    if start_written:
+                                        logging.info(f"Start op {start_machine_str}")
                             end_machine_str = (
                                 ma_kw_dt[m][r + RL[m] - 1] + dt.timedelta(seconds=900)
                             ).strftime("%Y-%m-%d %H:%M")
                             if ma_entity_plan_end[m] is not None:
                                 if self.debug:
                                     logging.info(f"Zou klaar zijn op {end_machine_str}")
-                                else:
-                                    self.call_service(
-                                        "set_datetime",
-                                        entity_id=ma_entity_plan_end[m],
-                                        datetime=end_machine_str,
+                                elif not start_written:
+                                    # Keep the stored start and end from the same plan.
+                                    logging.warning(
+                                        f"Eindtijd {end_machine_str} van {ma_name[m]} niet "
+                                        f"geschreven, omdat de starttijd niet geschreven is."
                                     )
-                                    logging.info(f"Is klaar op {end_machine_str}")
+                                else:
+                                    if self._write_planned_datetime(
+                                        ma_entity_plan_end[m], end_machine_str, ma_name[m]
+                                    ):
+                                        logging.info(f"Is klaar op {end_machine_str}")
                     if start_machine_str == "":
                         logging.info("Niet ingepland")
 

@@ -1,5 +1,5 @@
 {% set state = job["state"] if job else "idle" %}
-<div class="col-12 p-1 sticky-top {% if state in ("running", "queued", "joined", "cancelled", "superseded") %}bg-warning-subtle{% elif state in ("error", "timeout") %}bg-danger-subtle{% else %}bg-success-subtle{% endif %}">
+<div class="col-12 p-1 sticky-top {% if state in ("running", "queued", "joined", "cancelled", "superseded") %}theme-subtle theme-warning{% elif state in ("error", "timeout") %}theme-subtle theme-danger{% else %}theme-subtle theme-success{% endif %}">
 <h2>
     {% if job %}{{names.get(job["task"], job["task"])}}: {{state}}{% else %}idle{% endif %}
 </h2>
@@ -21,7 +21,7 @@
         <td>{{entry["source"]}}</td>
         <td><a href="{{url_for('v2.task_cancel', job=entry['id'])}}" hx-boost="false"
                hx-get="{{url_for('v2.task_cancel', job=entry['id'])}}" hx-target="#status-target"
-               class="btn btn-sm btn-outline-danger py-0">Cancel</a></td>
+               class="btn-subtle theme-danger btn-sm py-0">Cancel</a></td>
     </tr>
     {% endfor %}
     </tbody>

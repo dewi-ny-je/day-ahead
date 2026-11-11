@@ -137,7 +137,11 @@ def get_closest_index_from_list(flist: list, ts: float) -> int:
     )
 
 
-def log_chart(datapath: str, pattern: str):
+# charts not drawn yet are listed by their saved data, drawn when shown
+CHART_PATTERNS = ("*.png", da_calc_graph.DATA_PATTERN)
+
+
+def log_chart(datapath: str, pattern: str, filename: str | None = None):
     #  By design; the get_file_list() is called over and over again to ensure an accurate reflection of the files
     flist = get_file_list_with_ts(app_datapath + datapath, pattern)
     if datapath == "images/":
@@ -147,7 +151,11 @@ def log_chart(datapath: str, pattern: str):
         return None
 
     show_index = request.args.get("i")
-    if show_index is None:
+    if filename is not None:
+        show_index = next((i for i, item in enumerate(flist) if item["name"] == filename), None)
+        if show_index is None:
+            return None
+    elif show_index is None:
         show_index = last_index
     else:
         show_index = int(show_index)
@@ -155,7 +163,7 @@ def log_chart(datapath: str, pattern: str):
     show_index = max(0, min(show_index, last_index))
 
     rq_ts = request.args.get("ts")
-    if rq_ts is not None:
+    if rq_ts is not None and filename is None:
         show_index = get_closest_index_from_list(flist, datetime.datetime.fromisoformat(rq_ts).timestamp())
 
     first_index = 0
@@ -178,6 +186,17 @@ def log_chart(datapath: str, pattern: str):
         "last_index": last_index,
         "show_ts": show_ts,
     }
+
+
+@v2.route("/navigation/<kind>")
+def navigation(kind):
+    sources = {"chart": ("images/", CHART_PATTERNS), "log": ("log/", "*.log")}
+    if kind not in sources or not request.args.get("filename"):
+        abort(404)
+    kwargs = log_chart(*sources[kind], filename=request.args["filename"])
+    if kwargs is None:
+        return "", 204
+    return render_template("v2/chart-log-navigation.html", kind=kind, **kwargs)
 
 
 def get_solar_items_with_ml():
@@ -205,8 +224,7 @@ def get_solar_items_with_ml():
 @v2.route("/")
 @v2.route("/chart")
 def chart():
-    # charts not drawn yet are listed by their saved data, drawn when shown
-    kwargs = log_chart("images/", ("*.png", da_calc_graph.DATA_PATTERN))
+    kwargs = log_chart("images/", CHART_PATTERNS)
     if kwargs is None:
         return render_template("v2/no-task.html")
 
