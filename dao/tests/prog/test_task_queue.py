@@ -25,6 +25,8 @@ WORKER = textwrap.dedent(
     task_def = {{"on_duplicate": policy}}
     if os.environ.get("TEST_TASK_TIMEOUT"):
         q.TASK_TIMEOUT = int(os.environ["TEST_TASK_TIMEOUT"])
+    if os.environ.get("TEST_OUTPUT_GRACE"):
+        q.OUTPUT_GRACE = int(os.environ["TEST_OUTPUT_GRACE"])
     job_id = q.run_gate(task, [], task_def)
     with open(marker, "a") as f:
         f.write(f"start {{task}} {{job_id}} {{time.time()}}\\n")
@@ -113,6 +115,31 @@ def test_hanging_task_is_stopped_after_the_timeout_and_the_queue_moves_on(queue,
         ["start", "meteo", id_hanging],
         ["start", "prices", id_next], ["end", "prices", id_next],
     ]
+
+
+def test_timeout_while_writing_results_lets_the_writes_complete(queue, monkeypatch):
+    start, events, _wait_for = queue
+    monkeypatch.setenv("TEST_TASK_TIMEOUT", "1")
+    proc, job_id = start("calc", "restart", duration=2, protect=True)
+
+    _finish_all(proc)
+
+    assert proc.returncode == 0
+    assert q.final_state(job_id) == q.DONE
+    assert events() == [["start", "calc", job_id], ["end", "calc", job_id]]
+
+
+def test_writes_that_hang_end_after_the_grace_time(queue, monkeypatch):
+    start, events, _wait_for = queue
+    monkeypatch.setenv("TEST_TASK_TIMEOUT", "1")
+    monkeypatch.setenv("TEST_OUTPUT_GRACE", "1")
+    proc, job_id = start("calc", "restart", duration=60, protect=True)
+
+    _finish_all(proc)
+
+    assert proc.returncode == -signal.SIGALRM
+    assert q.final_state(job_id) == q.TIMEOUT
+    assert events() == [["start", "calc", job_id]]
 
 
 def test_restart_stops_the_running_task_and_runs_the_new_one_next(queue):

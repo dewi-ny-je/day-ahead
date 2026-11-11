@@ -29,7 +29,7 @@ from dao.prog.config.loader import config_cache
 from dao.prog.production_bonus import ProductionBonus
 
 # from dao.prog.solar_predictor import SolarPredictor
-from dao.prog.utils import error_handling, get_tibber_data, interpolate
+from dao.prog.utils import error_handling, get_tibber_data, interpolate, unique_log_path
 from dao.prog.version import __version__
 
 # from dao.prog.solar_predictor import SolarPredictor
@@ -707,13 +707,7 @@ class DaBase(hass.Hass):
             # old_stdout = sys.stdout
             for handler in logger.handlers[:]:  # make a copy of the list
                 logger.removeHandler(handler)
-            file_name = (
-                "../data/log/"
-                + run_task["file_name"]
-                + "_"
-                + datetime.datetime.now().strftime("%Y-%m-%d__%H:%M:%S")
-                + ".log"
-            )
+            file_name = unique_log_path("../data/log/" + run_task["file_name"] + "_")
 
             file_handler = logging.FileHandler(file_name)
             da_task_queue.record_logfile(file_name)

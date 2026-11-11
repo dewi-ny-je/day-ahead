@@ -20,6 +20,7 @@ from dao.prog.config.loader import config_cache
 # from sqlalchemy.sql.coercions import expect_col_expression_collection
 from dao.prog.da_const import tasks as bewerkingen
 from dao.prog.da_report import Report
+from dao.prog.utils import unique_log_path
 from dao.prog.version import __version__
 
 app = Blueprint("app", __name__)
@@ -510,12 +511,8 @@ def run_process():
                         param_value = dct[run_bewerking["parameters"][j]][0]
                         if len(param_value) > 0:
                             extra_parameters.append(param_value)
-            logfile = (
-                "../data/log/"
-                + run_bewerking["file_name"]
-                + "_tmp_"
-                + datetime.datetime.now().strftime("%Y-%m-%d__%H:%M:%S")
-                + ".log"
+            logfile = unique_log_path(
+                "../data/log/" + run_bewerking["file_name"] + "_tmp_"
             )
 
             cmd = run_bewerking["cmd"] + extra_parameters

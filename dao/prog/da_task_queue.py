@@ -49,6 +49,9 @@ EXIT_CANCELLED = 4
 # longest a task may run, counted from the start of its run; a task that is
 # still running after this gets SIGALRM, which ends the process
 TASK_TIMEOUT = 30 * 60
+# once a task writes its results, a timeout gives it this much longer to
+# complete them before SIGALRM ends the process
+OUTPUT_GRACE = 10 * 60
 POLL_INTERVAL = 0.5
 HISTORY_SIZE = 50
 
@@ -78,6 +81,7 @@ JOIN = "join"
 _current_job_id: str | None = None
 _start_note: str | None = None
 _stop_requested = False
+_spawn_lock = threading.Lock()
 
 
 def queue_dir() -> Path:
@@ -488,17 +492,21 @@ def spawn(cmd: list[str], source: str, cwd=None, console_log: str | None = None,
     the process when it ends, unless the caller reads its output.
     """
     job_id = new_job_id()
-    proc = subprocess.Popen(
-        cmd, cwd=cwd, env=job_env(job_id, source, console_log), **popen_kwargs
-    )
+    parsed = task_from_cmd(cmd)
+    # starting and enrolling as one step keeps the order of the callers
+    # in this process
+    with _spawn_lock:
+        proc = subprocess.Popen(
+            cmd, cwd=cwd, env=job_env(job_id, source, console_log), **popen_kwargs
+        )
+        if parsed is not None:
+            task, args, task_def = parsed
+            enrol(task, args, task_def, job_id=job_id, source=source, pid=proc.pid,
+                  console_log=console_log)
     if popen_kwargs.get("stdout") != subprocess.PIPE:
         threading.Thread(target=proc.wait, daemon=True).start()
-    parsed = task_from_cmd(cmd)
     if parsed is None:
         return proc, job_id, wait_enrolled(job_id, proc)
-    task, args, task_def = parsed
-    enrol(task, args, task_def, job_id=job_id, source=source, pid=proc.pid,
-          console_log=console_log)
     return proc, job_id, get(job_id)
 
 
@@ -507,7 +515,8 @@ def protect_output():
 
     Called when a task starts writing its results: a SIGTERM that arrives
     after this point lets the task complete those writes instead of
-    leaving them half done.
+    leaving them half done, and reaching TASK_TIMEOUT gives the writes
+    OUTPUT_GRACE more seconds.
     """
     if _current_job_id is None or threading.current_thread() is not threading.main_thread():
         return
@@ -518,7 +527,15 @@ def protect_output():
             _stop_requested = True
             _say("Stopverzoek ontvangen; de resultaten worden eerst volledig weggeschreven")
 
+    def _grace(signum, frame):
+        # a task that hangs while writing still ends, after OUTPUT_GRACE
+        signal.signal(signal.SIGALRM, signal.SIG_DFL)
+        signal.alarm(OUTPUT_GRACE)
+        _say(f"Maximale looptijd bereikt; de resultaten krijgen nog {OUTPUT_GRACE} s "
+             "om volledig weggeschreven te worden")
+
     signal.signal(signal.SIGTERM, _defer)
+    signal.signal(signal.SIGALRM, _grace)
 
 
 def run_gate(task: str, args: list[str], task_def: dict | None = None) -> str:
