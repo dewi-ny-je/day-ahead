@@ -1,0 +1,43 @@
+Day Ahead Optimizer
+Copyright 2023-2026 Cees van Beek and the Day Ahead contributors
+
+This product is licensed under the Apache License, Version 2.0
+(see LICENSE.txt). Each contributor retains the copyright of their own
+contributions; the contributors are listed in AUTHORS.md and in the
+project's git history.
+
+This product bundles the following third-party components, each under
+its own license. The license texts are in the LICENSES/ directory and
+REUSE.toml lists the files each one covers.
+
+  jQuery 3.6.3
+    Copyright OpenJS Foundation and other contributors
+    MIT License
+    dao/webserver/app/static/v1/jquery.min.js
+
+  highlight.js 11.7.0 (core, JSON grammar, "googlecode" theme)
+    Copyright 2006-2022 Ivan Sagalaev and other contributors
+    BSD 3-Clause License
+    dao/webserver/app/static/v1/highlight.js, highlight.min.js,
+    json.min.js, googlecode.min.css
+
+  PrismJS 1.29.0
+    Copyright 2012 Lea Verou
+    MIT License
+    dao/webserver/app/static/v1/prism.js, prism.css
+
+  code-input
+    Copyright Oliver Geer (WebCoder49)
+    MIT License
+    dao/webserver/app/static/v1/code-input.js, code-input.css,
+    code-input.min.css, autodetect.js, prism-line-numbers.min.css
+
+  Material Icons font
+    Copyright Google LLC
+    Apache License 2.0
+    dao/webserver/app/static/v1/materialicons.ttf
+
+  Bootstrap color mode toggler (inline script)
+    Copyright 2011-2025 The Bootstrap Authors
+    Creative Commons Attribution 3.0 Unported
+    dao/webserver/app/templates/v2/base.html
