@@ -386,6 +386,8 @@ When changing branch protection, verify enforcement on a disposable PR branch: a
 
 ## Making Contributions
 
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first: it explains the license of your contribution and the required `Signed-off-by` line (Developer Certificate of Origin) on every commit.
+
 ### Branching Strategy
 
 This project uses the following branching model:
@@ -735,6 +737,8 @@ If you need assistance:
 ## License
 
 This project is licensed under the Apache License 2.0. See [LICENSE.txt](LICENSE.txt) for details.
+
+Copyright and attribution notices are in [NOTICE](NOTICE), the contributors are listed in [AUTHORS.md](AUTHORS.md), and the licenses of bundled third-party files are recorded in [REUSE.toml](REUSE.toml) and `LICENSES/`.
 
 ---
 

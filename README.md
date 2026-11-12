@@ -94,3 +94,8 @@ https://github.com/corneel27/day-ahead/discussions <br>
 Voordat je een issue invult of een discusie begint: doorzoek de geschiedenis, misschien is het probleem al 
 eerder aangekaart.<br>
 Of nog beter: Plaats een pull request met een oplossing of een nieuwe feature!
+
+## Licentie en auteurs
+Day Ahead Optimizer valt onder de [Apache License 2.0](LICENSE.txt).
+Copyright 2023-2026 Cees van Beek en de Day Ahead contributors; zie [NOTICE](NOTICE) en [AUTHORS.md](AUTHORS.md).
+Iedere bijdrager behoudt het auteursrecht op de eigen bijdrage. Hoe je bijdraagt (zonder CLA, met een `Signed-off-by` regel) staat in [CONTRIBUTING.md](CONTRIBUTING.md).
