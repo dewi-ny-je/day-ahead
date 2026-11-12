@@ -1,0 +1,13 @@
+# Maps the different names and addresses used in commits to one identity per
+# person, so that `git shortlog -sn` and scripts/update_authors.py count each
+# contributor once. Format: Canonical Name <canonical@email> <commit@email>
+Cees van Beek <16610333+corneel27@users.noreply.github.com>
+Cees van Beek <16610333+corneel27@users.noreply.github.com> <cees.van.beek@xs4all.nl>
+Bram Gradussen <7369304+bramgradussen@users.noreply.github.com>
+Bram Gradussen <7369304+bramgradussen@users.noreply.github.com> <bram.gradussen@nxp.com>
+Jeroen Simonetti <jsimonetti@users.noreply.github.com> <jeroen@simonetti.nl>
+Ton van Boven <36004234+tonvanboven@users.noreply.github.com> <info@tonvanboven.nl>
+storeman <81527+storeman@users.noreply.github.com> <github.polygraph447@passmail.net>
+storeman <81527+storeman@users.noreply.github.com> <martin@wi-ke.nl>
+bvweerd <b.van.weerd@gmail.com> <bastiaan.vanweerd@aimvalley.com>
+tomvanterve <150525118+tomvanterve@users.noreply.github.com>
