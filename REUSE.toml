@@ -1,0 +1,69 @@
+version = 1
+SPDX-PackageName = "day-ahead"
+SPDX-PackageSupplier = "Cees van Beek"
+SPDX-PackageDownloadLocation = "https://github.com/corneel27/day-ahead"
+
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2023-2026 Cees van Beek and the Day Ahead contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "dao/webserver/app/static/v1/jquery.min.js"
+precedence = "override"
+SPDX-FileCopyrightText = "OpenJS Foundation and other contributors"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = [
+    "dao/webserver/app/static/v1/highlight.js",
+    "dao/webserver/app/static/v1/highlight.min.js",
+    "dao/webserver/app/static/v1/json.min.js",
+    "dao/webserver/app/static/v1/googlecode.min.css",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2006-2022 Ivan Sagalaev and other contributors"
+SPDX-License-Identifier = "BSD-3-Clause"
+
+[[annotations]]
+path = [
+    "dao/webserver/app/static/v1/prism.js",
+    "dao/webserver/app/static/v1/prism.css",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2012 Lea Verou"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = [
+    "dao/webserver/app/static/v1/code-input.js",
+    "dao/webserver/app/static/v1/code-input.css",
+    "dao/webserver/app/static/v1/code-input.min.css",
+    "dao/webserver/app/static/v1/autodetect.js",
+    "dao/webserver/app/static/v1/prism-line-numbers.min.css",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Oliver Geer (WebCoder49)"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "dao/webserver/app/static/v1/materialicons.ttf"
+precedence = "override"
+SPDX-FileCopyrightText = "Google LLC"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "dao/webserver/app/templates/v2/base.html"
+precedence = "override"
+SPDX-FileCopyrightText = [
+    "2023-2026 Cees van Beek and the Day Ahead contributors",
+    "2011-2025 The Bootstrap Authors",
+]
+SPDX-License-Identifier = "Apache-2.0 AND CC-BY-3.0"
+
+[[annotations]]
+path = "DCO"
+precedence = "override"
+SPDX-FileCopyrightText = "2004, 2006 The Linux Foundation and its contributors"
+SPDX-License-Identifier = "LicenseRef-DCO"
