@@ -28,6 +28,7 @@ from sqlalchemy import (
 
 from dao.lib.da_graph import GraphBuilder
 from dao.prog.da_base import DaBase
+from dao.prog.hourly_energy_store import HourlyEnergyStore
 from dao.prog.production_bonus import (
     AnnualCapUsage,
     interval_durations,
@@ -2958,6 +2959,8 @@ class Report(DaBase):
         :param col_name:
         :return:
         """
+        if not self.hourly_energy_store.has_statistics(sensor):
+            return self.get_stored_week_data(sensor, weekday, vanaf, tot, col_name)
         """
         sql = "SELECT FROM_UNIXTIME(t2.`start_ts`) 'tijd', \
             GREATEST(0, round(t2.state - t1.`state`,3)) '" + col_name + "', \
@@ -3046,6 +3049,97 @@ class Report(DaBase):
         df_raw.fillna(0.0, inplace=True)
         df_wd = df_raw.loc[df_raw["weekdag"] == weekday]
         return df_wd
+
+    @property
+    def hourly_energy_store(self) -> HourlyEnergyStore:
+        """Hourly energy kept in DAO's database for entities without HA statistics."""
+        store = getattr(self, "_hourly_energy_store", None)
+        if store is None:
+            store = HourlyEnergyStore(self.db_da, self.db_ha)
+            self._hourly_energy_store = store
+        return store
+
+    def baseload_entities(self) -> list[str]:
+        """Every HA entity that calc_weekday_baseload reads."""
+        entities = []
+        for sensors in (
+            self.grid_consumption_sensors,
+            self.grid_production_sensors,
+            self.solar_production_ac_sensors,
+            self.ev_consumption_sensors,
+            self.wp_consumption_sensors,
+            self.boiler_consumption_sensors,
+            self.machine_consumption_sensors,
+            self.battery_consumption_sensors,
+            self.battery_production_sensors,
+        ):
+            for sensor in sensors or []:
+                if sensor not in entities:
+                    entities.append(sensor)
+        return entities
+
+    def hourly_energy_keep_days(self) -> int:
+        """Days of hourly energy the baseload calculation needs."""
+        # calc_weekday_baseload starts at midnight baseload_calc_periode days
+        # ago, one day is kept on top of that as a margin
+        return self.config.baseload_calc_periode + 2
+
+    def sync_hourly_energy(self, extra_entities: list[str] | None = None) -> dict:
+        """
+        Store the past hours of the baseload entities that have no long-term
+        statistics in HA, so their history no longer depends on the recorder's
+        purge_keep_days.
+        :param extra_entities: further entities to keep, read later with
+            get_hourly_energy
+        :return: {entity: number of hours stored}
+        """
+        entities = self.baseload_entities() + list(extra_entities or [])
+        try:
+            return self.hourly_energy_store.sync(
+                entities, self.hourly_energy_keep_days()
+            )
+        except Exception as ex:
+            logging.warning(f"Opslaan van de uurwaarden mislukt: {ex}")
+            return {}
+
+    def get_hourly_energy(
+            self, entity: str, vanaf: datetime.datetime, tot: datetime.datetime
+    ) -> pd.DataFrame:
+        """
+        The hourly energy (kWh) of an entity without long-term statistics, as
+        stored by sync_hourly_energy.
+        :return: DataFrame with "tijd" (local start of the hour), "utc" and
+            "value"; hours that were not recorded are absent
+        """
+        return self.hourly_energy_store.get_hourly(entity, vanaf, tot)
+
+    def get_stored_week_data(
+            self,
+            sensor: str,
+            weekday: int,
+            vanaf: datetime.datetime,
+            tot: datetime.datetime,
+            col_name: str,
+    ) -> pd.DataFrame:
+        """
+        get_sensor_week_data for an entity without long-term statistics, from
+        the hourly energy stored in DAO's database.
+        """
+        df = self.get_hourly_energy(sensor, vanaf, tot)
+        if len(df) == 0:
+            df = pd.DataFrame(columns=["weekdag", "tijd", "tot", col_name])
+        else:
+            df[col_name] = df["value"].round(3)
+            df["weekdag"] = df["tijd"].apply(
+                lambda x: self.tijd_at_interval("weekdag", x)
+            )
+            df["uur"] = df["tijd"].apply(
+                lambda x: self.tijd_at_interval("heel_uur", x)
+            )
+            df = df.drop(columns=["utc", "value"])
+        df.index = pd.to_datetime(df["tijd"])
+        df.fillna(0.0, inplace=True)
+        return df.loc[df["weekdag"] == weekday]
 
     def get_sensor_week_sum(
             self, sensor_list: list, weekday: int, vanaf: datetime.datetime, col_name: str
@@ -3192,6 +3286,7 @@ class Report(DaBase):
         return result
 
     def calc_save_baseloads(self):
+        self.sync_hourly_energy()
         for weekday in range(7):
             baseload = self.calc_weekday_baseload(weekday)
             logging.info(f"baseload voor weekdag {weekday} :")

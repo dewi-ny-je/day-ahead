@@ -34,6 +34,8 @@ from dao.lib.db_connections import make_db_da
 
 #  sys.path.append("../")
 from dao.prog.config.loader import ConfigurationLoader
+from dao.prog.hourly_energy_store import TABLE_NAME as HOURLY_ENERGY_TABLE
+from dao.prog.hourly_energy_store import define_table as define_hourly_energy_table
 
 
 class CheckDB:
@@ -347,6 +349,9 @@ class CheckDB:
         # Voeg indexen toe op kolom `time` in de values en prognoses tabel, indien niet bestaand
         self.ensure_time_indexes()
 
+        # Uurwaarden van HA-entiteiten zonder langetermijnstatistiek
+        self.ensure_hourly_energy_table()
+
         # timezone in postgresql could be wrong, check and report
         if self.db_da.db_dialect == "postgresql":
             with self.db_da.engine.connect() as con:
@@ -410,6 +415,15 @@ class CheckDB:
                     print(
                         f"Index '{index_name}' toegevoegd aan tabel '{table_name}'."
                     )
+
+    def ensure_hourly_energy_table(self) -> None:
+        """Create the table hourly_energy if it does not exist."""
+        if inspect(self.engine).has_table(HOURLY_ENERGY_TABLE):
+            return
+        define_hourly_energy_table(self.db_da.metadata).create(
+            self.engine, checkfirst=True
+        )
+        print(f'Tabel "{HOURLY_ENERGY_TABLE}" gecreeerd.')
 
     def ensure_column(self, table_name: str, column_name: str, type: String, default: String = None) -> bool:
         """
