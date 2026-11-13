@@ -64,6 +64,23 @@ def test_v2_co2_choices_and_forecast_period(client, monkeypatch, path, subject):
     generate.assert_called_once_with(subject, "tabel", "vandaag")
 
 
+@pytest.mark.parametrize("error", [
+    requests.exceptions.ConnectionError("connection lost"),
+    requests.exceptions.ReadTimeout("read timed out"),
+])
+def test_v2_report_shows_home_assistant_error_after_report_creation(client, monkeypatch, error):
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(v2_routes, "co2_sensor_config", lambda: None)
+    monkeypatch.setattr(v2_routes, "reports_gen", fail)
+    monkeypatch.setattr(v2_routes, "vite_tags", lambda _: "")
+    response = client.get("/v2/reports")
+    assert response.status_code == 503
+    assert b"The connection to Home Assistant failed or timed out" in response.data
+    assert b"Traceback" not in response.data
+
+
 @pytest.mark.parametrize("path,subject", [("reports", "co2"), ("savings", "save_co2")])
 def test_v2_co2_unavailable_without_sensor(client, monkeypatch, path, subject):
     monkeypatch.setattr(v2_routes, "co2_sensor_config", lambda: None)

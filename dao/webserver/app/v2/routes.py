@@ -17,7 +17,7 @@ from flask import (
     url_for,
 )
 from hassapi.exceptions import ClientError, Unauthorised
-from requests.exceptions import Timeout
+from requests.exceptions import RequestException, Timeout
 from werkzeug.security import safe_join
 
 from dao.prog import da_calc_graph, da_task_queue
@@ -43,6 +43,15 @@ def home_assistant_client_error(_error):
         "v2/home-assistant-error.html",
         error_message=("The Home Assistant API request failed. Check the Home Assistant "
                        "address and availability, then try again."),
+    ), 503
+
+
+@v2.errorhandler(RequestException)
+def home_assistant_request_error(_error):
+    return render_template(
+        "v2/home-assistant-error.html",
+        error_message=("The connection to Home Assistant failed or timed out. Check the Home "
+                       "Assistant address and availability, then try again."),
     ), 503
 
 
