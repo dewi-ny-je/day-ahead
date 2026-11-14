@@ -128,10 +128,6 @@ while true; do
                 sleep 2
             fi
 
-            # Gunicorn stoppen omdat we daarna beide opnieuw
-            # willen starten.
-            stop_gunicorn
-
             break
         fi
 
@@ -153,8 +149,6 @@ while true; do
                 echo "Gunicorn crashed with exit code $EXIT"
                 sleep 2
             fi
-
-            stop_scheduler
 
             break
         fi
@@ -190,5 +184,14 @@ while true; do
 
         sleep 1
     done
+
+    # Restart only processes that exited, keeping the other service available.
+    # Configuration changes only need a new inotify watch.
+    if ! kill -0 "$SCHEDULER_PID" 2>/dev/null; then
+        start_scheduler
+    fi
+    if ! kill -0 "$GUNICORN_PID" 2>/dev/null; then
+        start_gunicorn
+    fi
 
 done

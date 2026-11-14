@@ -17,7 +17,6 @@ window.chartReady = (document.getElementById('data-chart') || document.getElemen
 
 if (document.querySelector('code-input')) {
     import('./code-editor.js')
-    import('./code-editor.scss')
 }
 
 
