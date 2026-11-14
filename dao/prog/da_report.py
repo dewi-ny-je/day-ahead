@@ -958,6 +958,7 @@ class Report(DaBase):
             col_name: str,
             agg: str = "uur",
             sensor_type: str = "quantity",
+            fill_missing: bool = True,
     ) -> pd.DataFrame:
         """
         Retrieves and aggregates sensordata from ha database
@@ -967,6 +968,10 @@ class Report(DaBase):
         :param col_name: name off the column in the df
         :param agg: "maand", "dag", "uur" of "kwartier"
         :param sensor_type: "quantity" of "factor"
+        :param fill_missing: only for hourly quantities. True: hours without
+            statistics get a row with value 0, so the result has a row for
+            every hour. False: only hours with statistics are returned, so the
+            caller can tell "nothing measured" from "nothing recorded".
         :return: dataframe with the data
         """
         # Home Assistant bewaart zijn langetermijn-statistieken alleen per uur.
@@ -1143,7 +1148,7 @@ class Report(DaBase):
         # Print the raw DataFrame
 
         # fill 0 for missing records
-        if (agg == "uur") and (sensor_type == "quantity"):
+        if fill_missing and (agg == "uur") and (sensor_type == "quantity"):
             df_insert = pd.DataFrame(columns=list(df_raw.columns.values))
             if len(df_raw) > 0:
                 # de ontbrekende uren worden in utc geteld, zodat het dubbele
