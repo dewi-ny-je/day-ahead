@@ -3501,14 +3501,13 @@ class Report(DaBase):
 
         # gemeten productie
         sensors = device.entities_sensors
-        count = 0
+        df_solar = None
         for sensor in sensors:
             df_sensor = self.get_sensor_data(sensor, start, end, "gemeten")
-            if count == 0:
+            if df_solar is None:
                 df_solar = df_sensor
             else:
                 self.add_col_df(df_sensor, df_solar, "gemeten")
-            count += 1
         result["gemeten_prod"] = pd.NA
         self.add_col_df(df_solar, result, "gemeten", "gemeten_prod")
 
@@ -3530,30 +3529,28 @@ class Report(DaBase):
             pred_dao.append(prod)
         result["prognose_dao"] = pred_dao
 
-        # voorspelling ML
-
-        # solar_predictor = SolarPredictor()
-        # solar_prog = solar_predictor.predict_solar_device(device, start, end)
-        # dezelfde stralingsreeks als de dao-voorspelling hierboven: per uur de
+        # voorspelling ML, alleen als ml_prediction voor dit device aan staat.
+        # Dezelfde stralingsreeks als de dao-voorspelling hierboven: per uur de
         # meting als die aanwezig is en anders de prognose. Zonder dit rekent de
         # dao-kolom met de gemeten straling en de ml-kolom met de voorspelde,
         # waardoor de R2 van beide kolommen niet vergelijkbaar is.
-        solar_prog = self.calc_solar_predictions(
-            device,
-            start,
-            end,
-            interval="1hour",
-            _ml_prediction=True,
-            prefer_measured=True,
-        )
-        if "date_time" in solar_prog.columns:
-            solar_prog["slot"] = solar_prog["date_time"].map(
-                lambda moment: int(moment.timestamp())
-            )
-            solar_prog["tijd"] = solar_prog["date_time"].dt.tz_localize(None)
-        solar_prog.index = solar_prog["tijd"]
         result["prognose_ml"] = pd.NA
-        self.add_col_df(solar_prog, result, "prediction", "prognose_ml")
+        if device.ml_prediction:
+            solar_prog = self.calc_solar_predictions(
+                device,
+                start,
+                end,
+                interval="1hour",
+                _ml_prediction=True,
+                prefer_measured=True,
+            )
+            if "date_time" in solar_prog.columns:
+                solar_prog["slot"] = solar_prog["date_time"].map(
+                    lambda moment: int(moment.timestamp())
+                )
+                solar_prog["tijd"] = solar_prog["date_time"].dt.tz_localize(None)
+            solar_prog.index = solar_prog["tijd"]
+            self.add_col_df(solar_prog, result, "prediction", "prognose_ml")
         # result["prognose_ml"] = solar_prog["prediction"]
 
         result.drop(columns=["tijd"], inplace=True)
